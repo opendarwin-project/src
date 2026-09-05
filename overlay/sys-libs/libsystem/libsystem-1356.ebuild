@@ -96,6 +96,7 @@ src_compile() {
 		DSTROOT="${AVAILABILITY_S}/dst" \
 		cmake
 	cmake --build "${AVAILABILITY_S}/obj" || die "AvailabilityVersions build failed"
+	cmake --install "${AVAILABILITY_S}/obj" || die "AvailabilityVersions install failed"
 	cd "${WORKDIR}" || die
 
 	# Determine target arch
@@ -285,10 +286,7 @@ src_install() {
 	cp "${CARBONHEADERS_S}"/*.h "${hdr}/" || die
 	# Generated public Availability.h/AvailabilityInternal.h supersede
 	# CarbonHeaders' committed copies.
-	cp "${AVAILABILITY_S}"/obj/Availability.h "${hdr}/" || die
-	cp "${AVAILABILITY_S}"/obj/AvailabilityInternal.h "${hdr}/" || die
-	mkdir -p "${hdr}/os" || die
-	find "${AVAILABILITY_S}/obj" -name 'os_availability.h' -exec cp {} "${hdr}/os/" \; 2>/dev/null
+	cp -r "${AVAILABILITY_S}"/dst/usr/include/* "${hdr}/" || die
 
 	_install bsm "${OPENBSM_S}"/openbsm/bsm/*.h
 
