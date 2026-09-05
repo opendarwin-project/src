@@ -1,0 +1,5 @@
+CHOST="x86_64-apple-darwin"
+CTARGET="x86_64-apple-darwin"
+ARCH="x64-macos"
+ACCEPT_KEYWORDS="~x64-macos"
+USE="prefix-guest clang lld"

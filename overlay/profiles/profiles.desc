@@ -1,0 +1,2 @@
+arm64-macos    targets/darwin/macos/arm64    dev
+x64-macos      targets/darwin/macos/x64      dev

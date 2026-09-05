@@ -1,0 +1,2000 @@
+diff -urN --no-dereference '--exclude=BUILD' '--exclude=*.o' '--exclude=*.new' '--exclude=*.old' /tmp/sdk_test/xnu-xnu-10063.141.1/bsd/sys/make_symbol_aliasing.sh /tmp/xnu_inspect/bsd/sys/make_symbol_aliasing.sh
+--- /tmp/sdk_test/xnu-xnu-10063.141.1/bsd/sys/make_symbol_aliasing.sh	2024-08-19 23:08:01.000000000 -0700
++++ /tmp/xnu_inspect/bsd/sys/make_symbol_aliasing.sh	2026-09-05 02:02:38.009750167 -0700
+@@ -34,7 +34,7 @@
+ SDKROOT="$1"
+ OUTPUT="$2"
+ 
+-AVAILABILITY_PL="${SDKROOT}/${DRIVERKITROOT}/usr/local/libexec/availability.pl"
++AVAILABILITY_PL="/home/theo/.gentoo/usr/local/libexec/availability.pl"
+ 
+ if [ ! -x "${AVAILABILITY_PL}" ] ; then
+     echo "Unable to locate ${AVAILABILITY_PL} (or not executable)" >&2
+diff -urN --no-dereference '--exclude=BUILD' '--exclude=*.o' '--exclude=*.new' '--exclude=*.old' /tmp/sdk_test/xnu-xnu-10063.141.1/iokit/DriverKit/Makefile /tmp/xnu_inspect/iokit/DriverKit/Makefile
+--- /tmp/sdk_test/xnu-xnu-10063.141.1/iokit/DriverKit/Makefile	2024-08-19 23:08:01.000000000 -0700
++++ /tmp/xnu_inspect/iokit/DriverKit/Makefile	2026-09-05 02:07:19.391657112 -0700
+@@ -46,7 +46,7 @@
+ 				OSBoundedArray.h OSBoundedArrayRef.h OSBoundedPtr.h OSBoundedPtrFwd.h \
+ 				safe_allocation.h
+ 
+-EXPORT_MI_GEN_LIST = $(GENERATED_HEADERS)  $(OTHER_HEADERS)
++EXPORT_MI_GEN_LIST = $(GENERATED_HEADERS)
+ INSTALL_MI_GEN_LIST = $(GENERATED_HEADERS)  $(OTHER_HEADERS)
+ INSTALL_MI_LCL_GEN_LIST = $(GENERATED_HEADERS)  $(OTHER_HEADERS)
+ INSTALL_DRIVERKIT_MI_GEN_LIST = $(PUBLIC_GENERATED_HEADERS) $(OTHER_HEADERS)
+diff -urN --no-dereference '--exclude=BUILD' '--exclude=*.o' '--exclude=*.new' '--exclude=*.old' /tmp/sdk_test/xnu-xnu-10063.141.1/libkern/libkern/Makefile /tmp/xnu_inspect/libkern/libkern/Makefile
+--- /tmp/sdk_test/xnu-xnu-10063.141.1/libkern/libkern/Makefile	2024-08-19 23:08:01.000000000 -0700
++++ /tmp/xnu_inspect/libkern/libkern/Makefile	2026-09-05 02:05:57.242195269 -0700
+@@ -119,7 +119,7 @@
+ 
+ version.h: version.h.template $(NEWVERS) $(XNU_VERSION)
+ 	@$(LOG_GENERATE) "libkern/$@$(Color0) from $(ColorF)$<"
+-	$(_v)install $(DATA_INSTALL_FLAGS) $< $@
++	$(_v)$(INSTALL) $(DATA_INSTALL_FLAGS) $< $@
+ 	$(_v)$(NEWVERS) $@ > /dev/null
+ 
+ include $(MakeInc_rule)
+diff -urN --no-dereference '--exclude=BUILD' '--exclude=*.o' '--exclude=*.new' '--exclude=*.old' /tmp/sdk_test/xnu-xnu-10063.141.1/makedefs/MakeInc.cmd /tmp/xnu_inspect/makedefs/MakeInc.cmd
+--- /tmp/sdk_test/xnu-xnu-10063.141.1/makedefs/MakeInc.cmd	2024-08-19 23:08:01.000000000 -0700
++++ /tmp/xnu_inspect/makedefs/MakeInc.cmd	2026-09-05 02:12:26.017675825 -0700
+@@ -102,12 +102,12 @@
+ 	_v =
+ 	_vstdout =
+ 	_vstderr =
+-	XCRUN = /usr/bin/xcrun -verbose
++	XCRUN = xcrun -verbose
+ else
+ 	_v = @
+ 	_vstdout = > /dev/null
+ 	_vstderr = 2> /dev/null
+-	XCRUN = /usr/bin/xcrun
++	XCRUN = xcrun
+ endif
+ 
+ VERBOSE_GENERATED_MAKE_FRAGMENTS = NO
+@@ -215,10 +215,10 @@
+ # CC/CXX get defined by make(1) by default, so we can't check them
+ # against the empty string to see if they haven't been set
+ ifeq ($(origin CC),default)
+-	export CC := $(shell $(XCRUN) -sdk $(SDKROOT) -find clang)
++	export CC := $(XCRUN) -sdk $(SDKROOT) clang
+ endif
+ ifeq ($(origin CXX),default)
+-	export CXX := $(shell $(XCRUN) -sdk $(SDKROOT) -find clang++)
++	export CXX := $(XCRUN) -sdk $(SDKROOT) clang++
+ endif
+ ifeq ($(origin MIG),undefined)
+ 	export MIG := $(shell $(XCRUN) -sdk $(SDKROOT) -find mig)
+@@ -356,7 +356,7 @@
+ 	export HOST_GM4		:= $(shell $(XCRUN) -sdk $(HOST_SDKROOT) -find gm4)
+ endif
+ ifeq ($(origin HOST_CODESIGN),undefined)
+-	export HOST_CODESIGN	:= /usr/bin/codesign
++	export HOST_CODESIGN	:= true
+ endif
+ ifeq ($(origin HOST_CODESIGN_ALLOCATE),undefined)
+ 	export HOST_CODESIGN_ALLOCATE	:= $(shell $(XCRUN) -sdk $(HOST_SDKROOT) -find codesign_allocate)
+diff -urN --no-dereference '--exclude=BUILD' '--exclude=*.o' '--exclude=*.new' '--exclude=*.old' /tmp/sdk_test/xnu-xnu-10063.141.1/makedefs/MakeInc.def /tmp/xnu_inspect/makedefs/MakeInc.def
+--- /tmp/sdk_test/xnu-xnu-10063.141.1/makedefs/MakeInc.def	2024-08-19 23:08:01.000000000 -0700
++++ /tmp/xnu_inspect/makedefs/MakeInc.def	2026-09-05 02:12:37.576840647 -0700
+@@ -131,7 +131,7 @@
+ endif
+ 
+ ifeq ($(USE_WERROR),1)
+-WERROR := -Werror
++WERROR := -Wno-missing-include-dirs
+ endif
+ 
+ # Shared C/C++ warning flags
+diff -urN --no-dereference '--exclude=BUILD' '--exclude=*.o' '--exclude=*.new' '--exclude=*.old' /tmp/sdk_test/xnu-xnu-10063.141.1/makedefs/MakeInc.top /tmp/xnu_inspect/makedefs/MakeInc.top
+--- /tmp/sdk_test/xnu-xnu-10063.141.1/makedefs/MakeInc.top	2024-08-19 23:08:01.000000000 -0700
++++ /tmp/xnu_inspect/makedefs/MakeInc.top	2026-09-05 02:01:56.306609849 -0700
+@@ -285,7 +285,7 @@
+ # $(warning PRIMARY_KERNEL_CONFIGS is $(PRIMARY_KERNEL_CONFIGS))
+ # $(warning VARIANT_CONFIGS is $(VARIANT_CONFIGS))
+ 
+-MEMORY_SIZE := $(shell /usr/sbin/sysctl -n hw.memsize)
++MEMORY_SIZE := $(shell sysctl -n hw.memsize)
+ 
+ # Assume LTO scaling by default, unless it is being explicitly passed on the command-line
+ LARGE_BUILD_FOOTPRINT := $(if $(BUILD_LTO),$(BUILD_LTO),1)
+diff -urN --no-dereference '--exclude=BUILD' '--exclude=*.o' '--exclude=*.new' '--exclude=*.old' /tmp/sdk_test/xnu-xnu-10063.141.1/Makefile /tmp/xnu_inspect/Makefile
+--- /tmp/sdk_test/xnu-xnu-10063.141.1/Makefile	2024-08-19 23:08:01.000000000 -0700
++++ /tmp/xnu_inspect/Makefile	2026-09-05 02:01:56.306756951 -0700
+@@ -143,8 +143,8 @@
+ 
+ else ifneq ($(findstring xnu_tests,$(RC_ProjectName)),)
+ 
+-export SYSCTL_HW_PHYSICALCPU := $(shell /usr/sbin/sysctl -n hw.physicalcpu)
+-export SYSCTL_HW_LOGICALCPU  := $(shell /usr/sbin/sysctl -n hw.logicalcpu)
++export SYSCTL_HW_PHYSICALCPU := $(shell sysctl -n hw.physicalcpu)
++export SYSCTL_HW_LOGICALCPU  := $(shell sysctl -n hw.logicalcpu)
+ MAKEJOBS := --jobs=$(shell expr $(SYSCTL_HW_LOGICALCPU) + 1)
+ 
+ default: install
+@@ -160,8 +160,8 @@
+ 
+ else ifeq ($(RC_ProjectName),xnu_tests_driverkit)
+ 
+-export SYSCTL_HW_PHYSICALCPU := $(shell /usr/sbin/sysctl -n hw.physicalcpu)
+-export SYSCTL_HW_LOGICALCPU  := $(shell /usr/sbin/sysctl -n hw.logicalcpu)
++export SYSCTL_HW_PHYSICALCPU := $(shell sysctl -n hw.physicalcpu)
++export SYSCTL_HW_LOGICALCPU  := $(shell sysctl -n hw.logicalcpu)
+ MAKEJOBS := --jobs=$(shell expr $(SYSCTL_HW_LOGICALCPU) + 1)
+ 
+ default: install
+@@ -193,8 +193,8 @@
+ # CPUs. If the system does not support SMT, use N+1.
+ # If MAKEJOBS or -jN is passed on the make line, that takes precedence.
+ #
+-export SYSCTL_HW_PHYSICALCPU := $(shell /usr/sbin/sysctl -n hw.physicalcpu)
+-export SYSCTL_HW_LOGICALCPU  := $(shell /usr/sbin/sysctl -n hw.logicalcpu)
++export SYSCTL_HW_PHYSICALCPU := $(shell sysctl -n hw.physicalcpu)
++export SYSCTL_HW_LOGICALCPU  := $(shell sysctl -n hw.logicalcpu)
+ MAKEJOBS := --jobs=$(shell expr $(SYSCTL_HW_LOGICALCPU) + 1)
+ 
+ TOP_TARGETS = \
+diff -urN --no-dereference '--exclude=BUILD' '--exclude=*.o' '--exclude=*.new' '--exclude=*.old' /tmp/sdk_test/xnu-xnu-10063.141.1/SETUP/compat.h /tmp/xnu_inspect/SETUP/compat.h
+--- /tmp/sdk_test/xnu-xnu-10063.141.1/SETUP/compat.h	1969-12-31 16:00:00.000000000 -0800
++++ /tmp/xnu_inspect/SETUP/compat.h	2026-09-05 02:01:52.509074574 -0700
+@@ -0,0 +1,53 @@
++#ifndef _SETUP_COMPAT_H_
++#define _SETUP_COMPAT_H_
++
++#ifndef _GNU_SOURCE
++#define _GNU_SOURCE
++#endif
++
++#include <errno.h>
++#include <unistd.h>
++
++#ifndef getprogname
++static inline const char *getprogname(void) {
++    extern const char *__progname;
++    return __progname ? __progname : "xnu-setup";
++}
++#endif
++
++#define COPYFILE_DATA (1<<1)
++
++static inline int fcopyfile(int srcfd, int dstfd, void *state, int flags) {
++    char buf[65536];
++    ssize_t n;
++    while ((n = read(srcfd, buf, sizeof(buf))) > 0) {
++        char *p = buf;
++        while (n > 0) {
++            ssize_t w = write(dstfd, p, n);
++            if (w < 0) {
++                if (errno == EINTR) continue;
++                return -1;
++            }
++            p += w;
++            n -= w;
++        }
++    }
++    return (n < 0) ? -1 : 0;
++}
++
++#endif
++
++#include <stdlib.h>
++static inline void *setmode(const char *mode_str) {
++    char *endptr;
++    long val = strtol(mode_str, &endptr, 8);
++    if (*endptr != '\0') return NULL;
++    long *m = malloc(sizeof(long));
++    if (m) *m = val;
++    return m;
++}
++
++static inline mode_t getmode(const void *bbox, mode_t omode) {
++    if (!bbox) return omode;
++    return (mode_t)(*(const long *)bbox);
++}
+diff -urN --no-dereference '--exclude=BUILD' '--exclude=*.o' '--exclude=*.new' '--exclude=*.old' /tmp/sdk_test/xnu-xnu-10063.141.1/SETUP/config/doconf /tmp/xnu_inspect/SETUP/config/doconf
+--- /tmp/sdk_test/xnu-xnu-10063.141.1/SETUP/config/doconf	2024-08-19 23:08:01.000000000 -0700
++++ /tmp/xnu_inspect/SETUP/config/doconf	2026-09-05 02:11:40.493504991 -0700
+@@ -1,313 +1,185 @@
+-#!/bin/csh -f
+-set path = ($path .)
+-######################################################################
+-# HISTORY
+-#  1-Dec-87  Michael Young (mwyoung) at Carnegie-Mellon University
+-#	Added "-verbose" switch, so this script produces no output
+-#	in the normal case.
+-#
+-# 10-Oct-87  Mike Accetta (mja) at Carnegie-Mellon University
+-#	Flushed cmu_*.h and spin_locks.h
+-#	[ V5.1(XF18) ]
+-#
+-#  6-Apr-87  Avadis Tevanian (avie) at Carnegie-Mellon University
+-#	Use MASTER.local and MASTER.<machine>.local for generation of
+-#	configuration files in addition to MASTER and MASTER.<machine>.
+-#
+-# 25-Mar-87  Mike Accetta (mja) at Carnegie-Mellon University
+-#	Removed use of obsolete wb_*.h files when building the feature
+-#	list;  modified to save the previous configuration file and
+-#	display the differences between it and the new file.
+-#	[ V5.1(F8) ]
+-#
+-# 25-Mar-87  Avadis Tevanian (avie) at Carnegie-Mellon University
+-#	If there is no /etc/machine just print out a message telling
+-#	user to use the -cpu option.  I thought this script was supposed
+-#	to work even without a /etc/machine, but it doesn't... and this
+-#	is the easiest way out.
+-#
+-# 13-Mar-87  Mike Accetta (mja) at Carnegie-Mellon University
+-#	Added "romp_fpa.h" file to extra features for the RT.
+-#	[ V5.1(F7) ]
+-#
+-# 11-Mar-87  Mike Accetta (mja) at Carnegie-Mellon University
+-#	Updated to maintain the appropriate configuration features file
+-#	in the "machine" directory whenever the corresponding
+-#	configuration is generated.  This replaces the old mechanism of
+-#	storing this directly in the <sys/features.h> file since it was
+-#	machine dependent and also precluded building programs for more
+-#	than one configuration from the same set of sources.
+-#	[ V5.1(F6) ]
+-#
+-# 21-Feb-87  Mike Accetta (mja) at Carnegie-Mellon University
+-#	Fixed to require wired-in cpu type names for only those
+-#	machines where the kernel name differs from that provided by
+-#	/etc/machine (i.e. IBMRT => ca and SUN => sun3);  updated to
+-#	permit configuration descriptions in both machine indepedent
+-#	and dependent master configuration files so that attributes can
+-#	be grouped accordingly.
+-#	[ V5.1(F3) ]
+-#
+-# 17-Jan-87  Mike Accetta (mja) at Carnegie-Mellon University
+-#	Updated to work from any directory at the same level as
+-#	"conf"; generate configuration from both MASTER and
+-#	MASTER.<machine-type> files; added -cpu switch.
+-#	[ V5.1(F1) ]
+-#
+-# 18-Aug-86  Mike Accetta (mja) at Carnegie-Mellon University
+-#	Added -make switch and changed meaning of -config;  upgraded to
+-#	allow multiple attributes per configuration and to define
+-#	configurations in terms of these attributes within MASTER.
+-#
+-# 14-Apr-83  Mike Accetta (mja) at Carnegie-Mellon University
+-#	Added -config switch to only run /etc/config without 
+-#	"make depend" and "make".
+-#
+-######################################################################
+-
+-set prog=$0
+-set prog=$prog:t
+-set nonomatch
+-set OBJDIR=../BUILD
+-set SOURCEDIR=.
+-set CONFIG_DIR=$OBJROOT/SETUP/config
+-set MASTER_CONF_DIR=.
+-
+-set DEF_SEED=""
+-
+-
+-unset doconfig
+-unset beverbose
+-unset MACHINE
+-unset profile
+-unset SOC_CONFIG
+-unset PLATFORM
+-
+-while ($#argv >= 1)
+-    if ("$argv[1]" =~ -*) then
+-        switch ("$argv[1]")
+-	case "-c":
+-	case "-config":
+-	    set doconfig
+-	    breaksw
+-	case "-cpu":
+-	    if ($#argv < 2) then
+-		echo "${prog}: missing argument to ${argv[1]}"
+-		exit 1
+-	    endif
+-	    set MACHINE="$argv[2]"
+-	    shift
+-	    breaksw
+-	case "-soc":
+-	    if ($#argv < 2) then
+-		echo "${prog}: missing argument to ${argv[1]}"
+-		exit 1
+-	    endif
+-	    set SOC_CONFIG="$argv[2]"
+-	    if (`echo $SOC_CONFIG | awk '{print substr($0,0,2)}'` == "vm") then
+-	        set DEF_AVP="-DSOC_IS_VIRTUALIZED"
+-	    else
+-	        set DEF_AVP="-USOC_IS_VIRTUALIZED"
+-	    endif
+-	    shift
+-	    breaksw
+-	case "-platform":
+-	    if ($#argv < 2) then
+-		echo "${prog}: missing argument to ${argv[1]}"
+-		exit 1
+-	    endif
+-	    set PLATFORM="$argv[2]"
+-	    shift
+-	    breaksw
+-	case "-d":
+-	    if ($#argv < 2) then
+-		echo "${prog}: missing argument to ${argv[1]}"
+-		exit 1
+-	    endif
+-	    set OBJDIR="$argv[2]"
+-	    shift
+-	    breaksw
+-	case "-m":
+-	    if ($#argv < 2) then
+-		echo "${prog}: missing argument to ${argv[1]}"
+-		exit 1
+-	    endif
+-	    set MASTER_CONF_DIR="$argv[2]"
+-	    shift
+-	    breaksw
+-	case "-s":
+-	    if ($#argv < 2) then
+-		echo "${prog}: missing argument to ${argv[1]}"
+-		exit 1
+-	    endif
+-	    set SOURCEDIR="$argv[2]"
+-	    shift
+-	    breaksw
+-	case "-verbose":
+-	    set beverbose
+-	    breaksw
+-	case "-p":
+-	case "-profile":
+-	    set profile
+-	    breaksw
+-	default:
+-	    echo "${prog}: ${argv[1]}: unknown switch"
+-	    exit 1
+-	    breaksw
+-	endsw
+-	shift
+-    else
+-	break
+-    endif
+-end
+-
+-if ($#argv == 0) set argv=(GENERIC)
+-
+-if (! $?MACHINE) then
+-    echo "${prog}: MACHINE not set"
+-    exit 1
+-endif
+-
+-set cpu=`echo $MACHINE | tr A-Z a-z`
+-set ID=`echo $MACHINE | tr a-z A-Z`
+-set MASTER_DIR=${MASTER_CONF_DIR}
+-set MASTER =   ${MASTER_DIR}/MASTER
+-
+-foreach master_file (${MASTER}.${cpu}.${SOC_CONFIG}.${PLATFORM} ${MASTER}.${cpu}.${SOC_CONFIG} ${MASTER}.${cpu}.${PLATFORM} ${MASTER}.${cpu})
+-    if (-f $master_file) then
+-        set MASTER_CPU = $master_file
+-        break
+-    endif
+-end
+-
+-if ($?beverbose) then
+-    echo MASTER_CPU=$MASTER_CPU
+-endif
+-
+-foreach SYS ($argv)
+-    set SYSID=${SYS}_${ID}
+-    set SYSCONF=$OBJDIR/config.$SYSID
+-    set BLDDIR=$OBJDIR
+-    if ($?beverbose) then
+-        echo "[ generating $SYSID from $MASTER_DIR/MASTER{,.$cpu}{,.local} ]"
+-    endif
+-    echo +$SYS \
+-    | \
+-    cat $MASTER $MASTER_CPU - \
+-        $MASTER $MASTER_CPU \
+-    | \
+-    unifdef -t -DPLATFORM_${PLATFORM} -DCPU_$cpu -DSOC_CONFIG_${SOC_CONFIG} -DSYS_${SYS} $DEF_AVP $DEF_SEED - \
+-    | \
+-    sed -n \
+-	-e "/^+/{" \
+-	   -e "s;[-+];#&;gp" \
+-	      -e 't loop' \
+-	   -e ': loop' \
+-           -e 'n' \
+-	   -e '/^#/b loop' \
+-	   -e '/^$/b loop' \
+-	   -e 's;^\([^#]*\).*#[ 	]*<\(.*\)>[ 	]*$;\2#\1;' \
+-	      -e 't not' \
+-	   -e 's;\([^#]*\).*;#\1;' \
+-	      -e 't not' \
+-	   -e ': not' \
+-	   -e 's;[ 	]*$;;' \
+-	   -e 's;^\!\(.*\);\1#\!;' \
+-	   -e 'p' \
+-	      -e 't loop' \
+-           -e 'b loop' \
+-	-e '}' \
+-	-e "/^[^#]/d" \
+-	-e 's;	; ;g' \
+-	-e "s;^# *\([^ ]*\)[ ]*=[ ]*\[\(.*\)\].*;\1#\2;p" \
+-    | \
+-    awk '-F#' '\
+-part == 0 && $1 != "" {\
+-	m[$1]=m[$1] " " $2;\
+-	next;\
+-}\
+-part == 0 && $1 == "" {\
+-	for (i=NF;i>1;i--){\
+-		s=substr($i,2);\
+-		c[++na]=substr($i,1,1);\
+-		a[na]=s;\
+-	}\
+-	while (na > 0){\
+-		s=a[na];\
+-		d=c[na--];\
+-		if (m[s] == "") {\
+-			f[s]=d;\
+-		} else {\
+-			nx=split(m[s],x," ");\
+-			for (j=nx;j>0;j--) {\
+-				z=x[j];\
+-				a[++na]=z;\
+-				c[na]=d;\
+-			}\
+-		}\
+-	}\
+-	part=1;\
+-	next;\
+-}\
+-part != 0 {\
+-	if ($1 != "") {\
+-		n=split($1,x,",");\
+-		ok=0;\
+-		for (i=1;i<=n;i++) {\
+-			if (f[x[i]] == "+") {\
+-				ok=1;\
+-			}\
+-		}\
+-		if (NF > 2 && ok == 0 || NF <= 2 && ok != 0) {\
+-			print $2; \
+-		}\
+-	} else { \
+-		print $2; \
+-	}\
+-}\
+-' >$SYSCONF.new
+-    if (-z $SYSCONF.new) then
+-	echo "${prog}: ${$SYSID}: no such configuration in $MASTER_DIR/MASTER{,.$cpu}"
+-	rm -f $SYSCONF.new
+-    endif
+-#
+-# These paths are used by config.
+-#
+-# "builddir" is the name of the directory where kernel binaries
+-# are put.  It is a single path element, never absolute, and is
+-# always relative to "objectdir".  "builddir" is used by config
+-# solely to determine where to put files created by "config" (e.g.
+-# the created Makefile and *.h's.)
+-#
+-# "objectdir" is the name of the directory which will hold "builddir".
+-# It is a path; if relative, it is relative to the current directory
+-# where config is run.  It's sole use is to be prepended to "builddir"
+-# to indicate where config-created files are to be placed (see above).
+-#
+-# "sourcedir" is the location of the sources used to build the kernel.
+-# It is a path; if relative, it is relative to the directory specified
+-# by the concatenation of "objectdir" and "builddir" (i.e. where the
+-# kernel binaries are put).
+-#
+-    echo 'builddir	"."'			>> $SYSCONF.new
+-    echo 'objectdir	"'$OBJDIR'"'		>> $SYSCONF.new
+-    set SRCDIR=`dirname $SOURCE`
+-    echo 'sourcedir	"'$SRCROOT'"'		>> $SYSCONF.new
+-    if (-f $SYSCONF) then
+-	diff $SYSCONF $SYSCONF.new
+-	rm -f $SYSCONF.old
+-	mv $SYSCONF $SYSCONF.old
+-    endif
+-    rm -f $SYSCONF
+-    mv $SYSCONF.new $SYSCONF
+-    if ($?doconfig) then
+-        if ($?beverbose) then
+-	    echo "[ configuring $SYSID ]"
+-        endif
+-	if ($?profile) then
+-	    $CONFIG_DIR/config -c $SOURCEDIR -p $SYSCONF
+-	else
+-	    $CONFIG_DIR/config -c $SOURCEDIR $SYSCONF
+-	endif
+-    endif
+-end
++#!/usr/bin/env python3
++import sys, os, re, subprocess
++
++def doconf(argv):
++    prog = os.path.basename(argv[0])
++    objdir = "../BUILD"
++    sourcedir = "."
++    master_conf_dir = "."
++    def_seed = ""
++    def_avp = ""
++    doconfig = False
++    beverbose = False
++    machine = ""
++    profile = False
++    soc_config = ""
++    platform = ""
++    srcroot = os.environ.get("SRCROOT", ".")
++    objroot = os.environ.get("OBJROOT", objdir)
++    config_dir = os.path.join(objroot, "SETUP/config")
++
++    i = 1
++    sys_configs = []
++    while i < len(argv):
++        arg = argv[i]
++        if arg in ("-c", "-config"):
++            doconfig = True
++            i += 1
++        elif arg == "-cpu":
++            machine = argv[i+1]
++            i += 2
++        elif arg == "-soc":
++            soc_config = argv[i+1]
++            if soc_config.startswith("vm"):
++                def_avp = "-DSOC_IS_VIRTUALIZED"
++            else:
++                def_avp = "-USOC_IS_VIRTUALIZED"
++            i += 2
++        elif arg == "-platform":
++            platform = argv[i+1]
++            i += 2
++        elif arg == "-d":
++            objdir = argv[i+1]
++            i += 2
++        elif arg == "-m":
++            master_conf_dir = argv[i+1]
++            i += 2
++        elif arg == "-s":
++            sourcedir = argv[i+1]
++            i += 2
++        elif arg == "-verbose":
++            beverbose = True
++            i += 1
++        elif arg in ("-p", "-profile"):
++            profile = True
++            i += 1
++        elif arg.startswith("-"):
++            print(f"{prog}: {arg}: unknown switch", file=sys.stderr)
++            sys.exit(1)
++        else:
++            sys_configs.append(arg)
++            i += 1
++
++    if not sys_configs:
++        sys_configs = ["GENERIC"]
++
++    if not machine:
++        print(f"{prog}: MACHINE not set", file=sys.stderr)
++        sys.exit(1)
++
++    cpu = machine.lower()
++    ID = machine.upper()
++    master = os.path.join(master_conf_dir, "MASTER")
++    master_cpu = ""
++    candidates = [
++        f"{master}.{cpu}.{soc_config}.{platform}",
++        f"{master}.{cpu}.{soc_config}",
++        f"{master}.{cpu}.{platform}",
++        f"{master}.{cpu}",
++    ]
++    for c in candidates:
++        if os.path.isfile(c):
++            master_cpu = c
++            break
++
++    for sys_name in sys_configs:
++        sysid = f"{sys_name}_{ID}"
++        sysconf = os.path.join(objdir, f"config.{sysid}")
++        if beverbose:
++            print(f"[ generating {sysid} from {master_conf_dir}/MASTER{{,.{cpu}}}{{,.local}} ]")
++
++        with open(master) as f:
++            master_content = f.read()
++        master_cpu_content = ""
++        if master_cpu and os.path.isfile(master_cpu):
++            with open(master_cpu) as f:
++                master_cpu_content = f.read()
++
++        unifdef_cmd = [
++            "unifdef", "-t",
++            f"-DPLATFORM_{platform}",
++            f"-DCPU_{cpu}",
++            f"-DSOC_CONFIG_{soc_config}",
++            f"-DSYS_{sys_name}"
++        ]
++        if def_avp:
++            unifdef_cmd.append(def_avp)
++        if def_seed:
++            unifdef_cmd.append(def_seed)
++
++        p = subprocess.run(
++            unifdef_cmd,
++            input=f"{master_content}\n{master_cpu_content}",
++            stdout=subprocess.PIPE,
++            text=True
++        )
++        lines = p.stdout.splitlines()
++
++        mappings = {}
++        content_lines = []
++        for line in lines:
++            m = re.match(r'^\s*#?\s*([A-Za-z0-9_]+)\s*=\s*\[(.*?)\]', line)
++            if m:
++                mappings[m.group(1)] = m.group(2).split()
++            else:
++                content_lines.append(line)
++
++        active_tags = set()
++        stack = [sys_name]
++        while stack:
++            item = stack.pop()
++            if item in mappings:
++                for sub in mappings[item]:
++                    stack.append(sub)
++            else:
++                active_tags.add(item)
++
++        result_lines = []
++        for line in content_lines:
++            sline = line.strip()
++            if not sline or sline.startswith('#'):
++                continue
++            m = re.search(r'#\s*<([^>]+)>\s*$', line)
++            if m:
++                selector = m.group(1)
++                code_part = line[:m.start()].rstrip()
++                sel_items = [t.strip() for t in selector.split(',')]
++                ok = False
++                for t in sel_items:
++                    if t.startswith('!'):
++                        if t[1:] not in active_tags:
++                            ok = True
++                    else:
++                        if t in active_tags:
++                            ok = True
++                if ok:
++                    result_lines.append(code_part)
++            else:
++                result_lines.append(line)
++
++        result_lines.append('builddir\t"."')
++        result_lines.append(f'objectdir\t"{objdir}"')
++        result_lines.append(f'sourcedir\t"{srcroot}"')
++
++        os.makedirs(objdir, exist_ok=True)
++        with open(f"{sysconf}.new", "w") as f:
++            f.write("\n".join(result_lines) + "\n")
++
++        if os.path.isfile(sysconf):
++            if os.path.isfile(f"{sysconf}.old"):
++                os.unlink(f"{sysconf}.old")
++            os.rename(sysconf, f"{sysconf}.old")
++        os.rename(f"{sysconf}.new", sysconf)
++
++        if doconfig:
++            if beverbose:
++                print(f"[ configuring {sysid} ]")
++            config_bin = os.path.join(config_dir, "config")
++            cfg_cmd = [config_bin, "-c", sourcedir]
++            if profile:
++                cfg_cmd.append("-p")
++            cfg_cmd.append(sysconf)
++            subprocess.run(cfg_cmd, check=True)
++
++if __name__ == "__main__":
++    doconf(sys.argv)
+diff -urN --no-dereference '--exclude=BUILD' '--exclude=*.o' '--exclude=*.new' '--exclude=*.old' /tmp/sdk_test/xnu-xnu-10063.141.1/SETUP/decomment/decomment.c /tmp/xnu_inspect/SETUP/decomment/decomment.c
+--- /tmp/sdk_test/xnu-xnu-10063.141.1/SETUP/decomment/decomment.c	2024-08-19 23:08:01.000000000 -0700
++++ /tmp/xnu_inspect/SETUP/decomment/decomment.c	2026-09-05 02:02:04.269159897 -0700
+@@ -30,7 +30,7 @@
+ 
+ #include <stdio.h>
+ #include <ctype.h>      /* for isspace */
+-#include <libc.h>
++#include "../libc.h"
+ 
+ /*
+  * State of input scanner.
+diff -urN --no-dereference '--exclude=BUILD' '--exclude=*.o' '--exclude=*.new' '--exclude=*.old' /tmp/sdk_test/xnu-xnu-10063.141.1/SETUP/installfile/installfile.c /tmp/xnu_inspect/SETUP/installfile/installfile.c
+--- /tmp/sdk_test/xnu-xnu-10063.141.1/SETUP/installfile/installfile.c	2024-08-19 23:08:01.000000000 -0700
++++ /tmp/xnu_inspect/SETUP/installfile/installfile.c	2026-09-05 02:01:43.101035442 -0700
+@@ -34,7 +34,7 @@
+ #include <sys/param.h>
+ #include <sys/time.h>
+ 
+-#include <copyfile.h>
++#include "../compat.h"
+ 
+ void usage(void);
+ 
+diff -urN --no-dereference '--exclude=BUILD' '--exclude=*.o' '--exclude=*.new' '--exclude=*.old' /tmp/sdk_test/xnu-xnu-10063.141.1/SETUP/kextsymboltool/kextsymboltool.c /tmp/xnu_inspect/SETUP/kextsymboltool/kextsymboltool.c
+--- /tmp/sdk_test/xnu-xnu-10063.141.1/SETUP/kextsymboltool/kextsymboltool.c	2024-08-19 23:08:01.000000000 -0700
++++ /tmp/xnu_inspect/SETUP/kextsymboltool/kextsymboltool.c	2026-09-05 02:02:12.438157447 -0700
+@@ -1,969 +1,3 @@
+-/*
+- * Copyright (c) 2006 Apple Computer, Inc. All rights reserved.
+- *
+- * @APPLE_LICENSE_HEADER_START@
+- *
+- * This file contains Original Code and/or Modifications of Original Code
+- * as defined in and that are subject to the Apple Public Source License
+- * Version 2.0 (the 'License'). You may not use this file except in
+- * compliance with the License. Please obtain a copy of the License at
+- * http://www.opensource.apple.com/apsl/ and read it before using this
+- * file.
+- *
+- * The Original Code and all software distributed under the License are
+- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+- * Please see the License for the specific language governing rights and
+- * limitations under the License.
+- *
+- * @APPLE_LICENSE_HEADER_END@
+- */
+-#include <libc.h>
+-#include <errno.h>
+-#include <ctype.h>
+-
+-#include <mach/mach_init.h>
+-
+-#include <sys/stat.h>
+-#include <sys/file.h>
+-#include <sys/mman.h>
+-
+-#include <mach-o/arch.h>
+-#include <mach-o/fat.h>
+-#include <mach-o/loader.h>
+-#include <mach-o/nlist.h>
+-#include <mach-o/swap.h>
+-
+-#include <uuid/uuid.h>
+-#include <stdbool.h>
+-
+-#pragma mark Typedefs, Enums, Constants
+-/*********************************************************************
+-* Typedefs, Enums, Constants
+-*********************************************************************/
+-typedef enum {
+-	kErrorNone = 0,
+-	kError,
+-	kErrorFileAccess,
+-	kErrorDiskFull,
+-	kErrorDuplicate
+-} ToolError;
+-
+-#pragma mark Function Protos
+-/*********************************************************************
+-* Function Protos
+-*********************************************************************/
+-__private_extern__ ToolError
+-readFile(const char *path, vm_offset_t * objAddr, vm_size_t * objSize);
+-
+-__private_extern__ ToolError
+-writeFile(int fd, const void * data, size_t length);
+-
+-__private_extern__ ToolError
+-seekFile(int fd, off_t offset);
+-
+-extern char* __cxa_demangle(const char* mangled_name,
+-    char* buf,
+-    size_t* n,
+-    int* status);
+-
+-#pragma mark Functions
+-/*********************************************************************
+-*********************************************************************/
+-__private_extern__ ToolError
+-writeFile(int fd, const void * data, size_t length)
+-{
+-	ToolError err;
+-
+-	if (length != (size_t)write(fd, data, length)) {
+-		err = kErrorDiskFull;
+-	} else {
+-		err = kErrorNone;
+-	}
+-
+-	if (kErrorNone != err) {
+-		perror("couldn't write output");
+-	}
+-
+-	return err;
+-}
+-
+-/*********************************************************************
+-*********************************************************************/
+-__private_extern__ ToolError
+-seekFile(int fd, off_t offset)
+-{
+-	ToolError err;
+-
+-	if (offset != lseek(fd, offset, SEEK_SET)) {
+-		err = kErrorDiskFull;
+-	} else {
+-		err = kErrorNone;
+-	}
+-
+-	if (kErrorNone != err) {
+-		perror("couldn't write output");
+-	}
+-
+-	return err;
+-}
+-
+-/*********************************************************************
+-*********************************************************************/
+-__private_extern__ ToolError
+-readFile(const char *path, vm_offset_t * objAddr, vm_size_t * objSize)
+-{
+-	ToolError err = kErrorFileAccess;
+-	int fd;
+-	struct stat stat_buf;
+-
+-	*objAddr = 0;
+-	*objSize = 0;
+-
+-	do{
+-		if ((fd = open(path, O_RDONLY)) == -1) {
+-			continue;
+-		}
+-
+-		if (fstat(fd, &stat_buf) == -1) {
+-			continue;
+-		}
+-
+-		if (0 == (stat_buf.st_mode & S_IFREG)) {
+-			continue;
+-		}
+-
+-		/* Don't try to map an empty file, it fails now due to conformance
+-		 * stuff (PR 4611502).
+-		 */
+-		if (0 == stat_buf.st_size) {
+-			err = kErrorNone;
+-			continue;
+-		}
+-
+-		*objSize = stat_buf.st_size;
+-
+-		*objAddr = (vm_offset_t)mmap(NULL /* address */, *objSize,
+-		    PROT_READ | PROT_WRITE, MAP_FILE | MAP_PRIVATE /* flags */,
+-		    fd, 0 /* offset */);
+-
+-		if ((void *)*objAddr == MAP_FAILED) {
+-			*objAddr = 0;
+-			*objSize = 0;
+-			continue;
+-		}
+-
+-		err = kErrorNone;
+-	} while (false);
+-
+-	if (-1 != fd) {
+-		close(fd);
+-	}
+-	if (kErrorNone != err) {
+-		fprintf(stderr, "couldn't read %s: %s\n", path, strerror(errno));
+-	}
+-
+-	return err;
+-}
+-
+-
+-enum { kExported = 0x00000001, kObsolete = 0x00000002 };
+-
+-struct symbol {
+-	char * name;
+-	unsigned int name_len;
+-	char * indirect;
+-	unsigned int indirect_len;
+-	unsigned int flags;
+-	struct symbol * list;
+-	unsigned int list_count;
+-};
+-
+-static bool
+-issymchar( char c )
+-{
+-	return (c > ' ') && (c <= '~') && (c != ':') && (c != '#');
+-}
+-
+-static bool
+-iswhitespace( char c )
+-{
+-	return (c == ' ') || (c == '\t');
+-}
+-
+-/*
+- * Function for qsort for comparing symbol list names.
+- */
+-static int
+-qsort_cmp(const void * _left, const void * _right)
+-{
+-	struct symbol * left  = (struct symbol *) _left;
+-	struct symbol * right = (struct symbol *) _right;
+-
+-	return strcmp(left->name, right->name);
+-}
+-
+-/*
+- * Function for bsearch for finding a symbol name.
+- */
+-
+-static int
+-bsearch_cmp( const void * _key, const void * _cmp)
+-{
+-	char * key = (char *)_key;
+-	struct symbol * cmp = (struct symbol *) _cmp;
+-
+-	return strcmp(key, cmp->name);
+-}
+-
+-struct bsearch_key {
+-	char * name;
+-	unsigned int name_len;
+-};
+-
+-static int
+-bsearch_cmp_prefix( const void * _key, const void * _cmp)
+-{
+-	struct bsearch_key * key = (struct bsearch_key *)_key;
+-	struct symbol *      cmp = (struct symbol *) _cmp;
+-
+-	return strncmp(key->name, cmp->name, key->name_len);
+-}
+-
+-static uint32_t
+-count_symbols(char * file, vm_size_t file_size)
+-{
+-	uint32_t nsyms = 0;
+-	char *   scan;
+-	char *   eol;
+-	char *   next;
+-
+-	for (scan = file; true; scan = next) {
+-		eol = memchr(scan, '\n', file_size - (scan - file));
+-		if (eol == NULL) {
+-			break;
+-		}
+-		next = eol + 1;
+-
+-		/* Skip empty lines.
+-		 */
+-		if (eol == scan) {
+-			continue;
+-		}
+-
+-		/* Skip comment lines.
+-		 */
+-		if (scan[0] == '#') {
+-			continue;
+-		}
+-
+-		/* Scan past any non-symbol characters at the beginning of the line. */
+-		while ((scan < eol) && !issymchar(*scan)) {
+-			scan++;
+-		}
+-
+-		/* No symbol on line? Move along.
+-		 */
+-		if (scan == eol) {
+-			continue;
+-		}
+-
+-		/* Skip symbols starting with '.'.
+-		 */
+-		if (scan[0] == '.') {
+-			continue;
+-		}
+-		nsyms++;
+-	}
+-
+-	return nsyms;
+-}
+-
+-static uint32_t
+-store_symbols(char * file, vm_size_t file_size, struct symbol * symbols, uint32_t idx, uint32_t max_symbols)
+-{
+-	char *   scan;
+-	char *   line;
+-	char *   eol;
+-	char *   next;
+-
+-	uint32_t strtabsize;
+-
+-	strtabsize = 0;
+-
+-	for (scan = file, line = file; true; scan = next, line = next) {
+-		char *       name = NULL;
+-		char *       name_term = NULL;
+-		unsigned int name_len = 0;
+-		char *       indirect = NULL;
+-		char *       indirect_term = NULL;
+-		unsigned int indirect_len = 0;
+-		char *       option = NULL;
+-		char *       option_term = NULL;
+-		unsigned int option_len = 0;
+-		char         optionstr[256];
+-		boolean_t    obsolete = 0;
+-
+-		eol = memchr(scan, '\n', file_size - (scan - file));
+-		if (eol == NULL) {
+-			break;
+-		}
+-		next = eol + 1;
+-
+-		/* Skip empty lines.
+-		 */
+-		if (eol == scan) {
+-			continue;
+-		}
+-
+-		*eol = '\0';
+-
+-		/* Skip comment lines.
+-		 */
+-		if (scan[0] == '#') {
+-			continue;
+-		}
+-
+-		/* Scan past any non-symbol characters at the beginning of the line. */
+-		while ((scan < eol) && !issymchar(*scan)) {
+-			scan++;
+-		}
+-
+-		/* No symbol on line? Move along.
+-		 */
+-		if (scan == eol) {
+-			continue;
+-		}
+-
+-		/* Skip symbols starting with '.'.
+-		 */
+-		if (scan[0] == '.') {
+-			continue;
+-		}
+-
+-		name = scan;
+-
+-		/* Find the end of the symbol.
+-		 */
+-		while ((*scan != '\0') && issymchar(*scan)) {
+-			scan++;
+-		}
+-
+-		/* Note char past end of symbol.
+-		 */
+-		name_term = scan;
+-
+-		/* Stored length must include the terminating nul char.
+-		 */
+-		name_len = name_term - name + 1;
+-
+-		/* Now look for an indirect.
+-		 */
+-		if (*scan != '\0') {
+-			while ((*scan != '\0') && iswhitespace(*scan)) {
+-				scan++;
+-			}
+-			if (*scan == ':') {
+-				scan++;
+-				while ((*scan != '\0') && iswhitespace(*scan)) {
+-					scan++;
+-				}
+-				if (issymchar(*scan)) {
+-					indirect = scan;
+-
+-					/* Find the end of the symbol.
+-					 */
+-					while ((*scan != '\0') && issymchar(*scan)) {
+-						scan++;
+-					}
+-
+-					/* Note char past end of symbol.
+-					 */
+-					indirect_term = scan;
+-
+-					/* Stored length must include the terminating nul char.
+-					 */
+-					indirect_len = indirect_term - indirect + 1;
+-				} else if (*scan == '\0') {
+-					fprintf(stderr, "bad format in symbol line: %s\n", line);
+-					exit(1);
+-				}
+-			} else if (*scan != '\0' && *scan != '-') {
+-				fprintf(stderr, "bad format in symbol line: %s\n", line);
+-				exit(1);
+-			}
+-		}
+-
+-		/* Look for options.
+-		 */
+-		if (*scan != '\0') {
+-			while ((*scan != '\0') && iswhitespace(*scan)) {
+-				scan++;
+-			}
+-
+-			if (*scan == '-') {
+-				scan++;
+-
+-				if (isalpha(*scan)) {
+-					option = scan;
+-
+-					/* Find the end of the option.
+-					 */
+-					while ((*scan != '\0') && isalpha(*scan)) {
+-						scan++;
+-					}
+-
+-					/* Note char past end of option.
+-					 */
+-					option_term = scan;
+-					option_len = option_term - option;
+-
+-					if (option_len >= sizeof(optionstr)) {
+-						fprintf(stderr, "option too long in symbol line: %s\n", line);
+-						exit(1);
+-					}
+-					memcpy(optionstr, option, option_len);
+-					optionstr[option_len] = '\0';
+-
+-					/* Find the option.
+-					 */
+-					if (!strncmp(optionstr, "obsolete", option_len)) {
+-						obsolete = TRUE;
+-					}
+-				} else if (*scan == '\0') {
+-					fprintf(stderr, "bad format in symbol line: %s\n", line);
+-					exit(1);
+-				}
+-			}
+-		}
+-
+-		if (idx >= max_symbols) {
+-			fprintf(stderr, "symbol[%d/%d] overflow: %s\n", idx, max_symbols, line);
+-			exit(1);
+-		}
+-
+-		*name_term = '\0';
+-		if (indirect_term) {
+-			*indirect_term = '\0';
+-		}
+-
+-		symbols[idx].name = name;
+-		symbols[idx].name_len = name_len;
+-		symbols[idx].indirect = indirect;
+-		symbols[idx].indirect_len = indirect_len;
+-		symbols[idx].flags = (obsolete) ? kObsolete : 0;
+-
+-		strtabsize += symbols[idx].name_len + symbols[idx].indirect_len;
+-		idx++;
+-	}
+-
+-	return strtabsize;
+-}
+-
+-static const NXArchInfo *
+-lookup_arch(const char *archstring)
+-{
+-	/*
+-	 * As new architectures are supported by xnu, add a mapping function
+-	 * without relying on host libraries.
+-	 */
+-	static const NXArchInfo archlist[] = {
+-		{ "x86_64", 0x01000007 /* CPU_TYPE_X86_64 */, 3 /* CPU_SUBTYPE_X86_64_ALL */, NX_LittleEndian, NULL },
+-		{ "x86_64h", 0x01000007 /* CPU_TYPE_X86_64 */, 8 /* CPU_SUBTYPE_X86_64_H */, NX_LittleEndian, NULL },
+-		{ "armv7", 12 /* CPU_TYPE_ARM */, 9 /* CPU_SUBTYPE_ARM_V7 */, NX_LittleEndian, NULL },
+-		{ "armv7s", 12 /* CPU_TYPE_ARM */, 11 /* CPU_SUBTYPE_ARM_V7S */, NX_LittleEndian, NULL },
+-		{ "armv7k", 12 /* CPU_TYPE_ARM */, 12 /* CPU_SUBTYPE_ARM_V7K */, NX_LittleEndian, NULL },
+-		{ "arm64", 0x0100000c /* CPU_TYPE_ARM64 */, 0 /* CPU_SUBTYPE_ARM64_ALL */, NX_LittleEndian, NULL },
+-		{ "arm64e", 0x0100000c /* CPU_TYPE_ARM64 */, 2 /* CPU_SUBTYPE_ARM64_E */, NX_LittleEndian, NULL },
+-	};
+-	unsigned long i;
+-
+-	for (i = 0; i < sizeof(archlist) / sizeof(archlist[0]); i++) {
+-		if (0 == strcmp(archstring, archlist[i].name)) {
+-			return &archlist[i];
+-		}
+-	}
+-
+-	return NULL;
+-}
+-
+-/*********************************************************************
+-*********************************************************************/
+-int
+-main(int argc, char * argv[])
+-{
+-	ToolError   err;
+-	int                 i, fd;
+-	const char *        output_name = NULL;
+-	uint32_t            zero = 0, num_files = 0;
+-	uint32_t            filenum;
+-	uint32_t            strx, strtabsize, strtabpad;
+-	struct symbol *     import_symbols;
+-	struct symbol *     export_symbols;
+-	uint32_t            num_import_syms, num_export_syms;
+-	uint32_t            result_count, num_removed_syms;
+-	uint32_t            import_idx, export_idx;
+-	const NXArchInfo *  host_arch;
+-	const NXArchInfo *  target_arch;
+-	boolean_t           require_imports = true;
+-	boolean_t           diff = false;
+-
+-
+-	struct file {
+-		vm_offset_t  mapped;
+-		vm_size_t    mapped_size;
+-		uint32_t     nsyms;
+-		boolean_t    import;
+-		const char * path;
+-	};
+-	struct file files[64];
+-
+-	host_arch = NXGetLocalArchInfo();
+-	target_arch = host_arch;
+-
+-	for (i = 1; i < argc; i += 2) {
+-		boolean_t import;
+-
+-		if (!strcmp("-sect", argv[i])) {
+-			require_imports = false;
+-			i--;
+-			continue;
+-		}
+-		if (!strcmp("-diff", argv[i])) {
+-			require_imports = false;
+-			diff = true;
+-			i--;
+-			continue;
+-		}
+-
+-		if (i == (argc - 1)) {
+-			fprintf(stderr, "bad arguments: %s\n", argv[i]);
+-			exit(1);
+-		}
+-
+-		if (!strcmp("-arch", argv[i])) {
+-			target_arch = lookup_arch(argv[i + 1]);
+-			if (!target_arch) {
+-				fprintf(stderr, "unknown architecture name: %s\n", argv[i + 1]);
+-				exit(1);
+-			}
+-			continue;
+-		}
+-		if (!strcmp("-output", argv[i])) {
+-			output_name = argv[i + 1];
+-			continue;
+-		}
+-
+-		if (!strcmp("-import", argv[i])) {
+-			import = true;
+-		} else if (!strcmp("-export", argv[i])) {
+-			import = false;
+-		} else {
+-			fprintf(stderr, "unknown option: %s\n", argv[i]);
+-			exit(1);
+-		}
+-
+-		err = readFile(argv[i + 1], &files[num_files].mapped, &files[num_files].mapped_size);
+-		if (kErrorNone != err) {
+-			exit(1);
+-		}
+-
+-		if (files[num_files].mapped && files[num_files].mapped_size) {
+-			files[num_files].import = import;
+-			files[num_files].path   = argv[i + 1];
+-			num_files++;
+-		}
+-	}
+-
+-	if (!output_name) {
+-		fprintf(stderr, "no output file\n");
+-		exit(1);
+-	}
+-
+-	num_import_syms = 0;
+-	num_export_syms = 0;
+-	for (filenum = 0; filenum < num_files; filenum++) {
+-		files[filenum].nsyms = count_symbols((char *) files[filenum].mapped, files[filenum].mapped_size);
+-		if (files[filenum].import) {
+-			num_import_syms += files[filenum].nsyms;
+-		} else {
+-			num_export_syms += files[filenum].nsyms;
+-		}
+-	}
+-
+-	import_symbols = calloc(num_import_syms, sizeof(struct symbol));
+-	export_symbols = calloc(num_export_syms, sizeof(struct symbol));
+-
+-	import_idx = 0;
+-	export_idx = 0;
+-
+-	for (filenum = 0; filenum < num_files; filenum++) {
+-		if (files[filenum].import) {
+-			store_symbols((char *) files[filenum].mapped, files[filenum].mapped_size,
+-			    import_symbols, import_idx, num_import_syms);
+-			import_idx += files[filenum].nsyms;
+-		} else {
+-			store_symbols((char *) files[filenum].mapped, files[filenum].mapped_size,
+-			    export_symbols, export_idx, num_export_syms);
+-			export_idx += files[filenum].nsyms;
+-		}
+-		if (false && !files[filenum].nsyms) {
+-			fprintf(stderr, "warning: file %s contains no names\n", files[filenum].path);
+-		}
+-	}
+-
+-
+-	qsort(import_symbols, num_import_syms, sizeof(struct symbol), &qsort_cmp);
+-	qsort(export_symbols, num_export_syms, sizeof(struct symbol), &qsort_cmp);
+-
+-	result_count = 0;
+-	num_removed_syms = 0;
+-	strtabsize = 4;
+-	if (num_import_syms) {
+-		for (export_idx = 0; export_idx < num_export_syms; export_idx++) {
+-			struct symbol * result;
+-			char * name;
+-			size_t len;
+-			boolean_t wild;
+-
+-			name = export_symbols[export_idx].indirect;
+-			len  = export_symbols[export_idx].indirect_len;
+-			if (!name) {
+-				name = export_symbols[export_idx].name;
+-				len  = export_symbols[export_idx].name_len;
+-			}
+-			wild = ((len > 2) && ('*' == name[len -= 2]));
+-			if (wild) {
+-				struct bsearch_key key;
+-				key.name = name;
+-				key.name_len = len;
+-				result = bsearch(&key, import_symbols,
+-				    num_import_syms, sizeof(struct symbol), &bsearch_cmp_prefix);
+-
+-				if (result) {
+-					struct symbol * first;
+-					struct symbol * last;
+-
+-					strtabsize += (result->name_len + result->indirect_len);
+-
+-					first = result;
+-					while (--first >= &import_symbols[0]) {
+-						if (bsearch_cmp_prefix(&key, first)) {
+-							break;
+-						}
+-						strtabsize += (first->name_len + first->indirect_len);
+-					}
+-					first++;
+-
+-					last = result;
+-					while (++last < (&import_symbols[0] + num_import_syms)) {
+-						if (bsearch_cmp_prefix(&key, last)) {
+-							break;
+-						}
+-						strtabsize += (last->name_len + last->indirect_len);
+-					}
+-					result_count += last - first;
+-					result = first;
+-					export_symbols[export_idx].list = first;
+-					export_symbols[export_idx].list_count = last - first;
+-					export_symbols[export_idx].flags |= kExported;
+-				}
+-			} else {
+-				result = bsearch(name, import_symbols,
+-				    num_import_syms, sizeof(struct symbol), &bsearch_cmp);
+-			}
+-
+-			if (!result && require_imports) {
+-				int status;
+-				char * demangled_result =
+-				    __cxa_demangle(export_symbols[export_idx].name + 1, NULL, NULL, &status);
+-				fprintf(stderr, "exported name not in import list: %s\n",
+-				    demangled_result ? demangled_result : export_symbols[export_idx].name);
+-//		fprintf(stderr, "                                : %s\n", export_symbols[export_idx].name);
+-				if (demangled_result) {
+-					free(demangled_result);
+-				}
+-				num_removed_syms++;
+-			}
+-			if (diff) {
+-				if (!result) {
+-					result = &export_symbols[export_idx];
+-				} else {
+-					result = NULL;
+-				}
+-			}
+-			if (result && !wild) {
+-				export_symbols[export_idx].flags |= kExported;
+-				strtabsize += (export_symbols[export_idx].name_len + export_symbols[export_idx].indirect_len);
+-				result_count++;
+-				export_symbols[export_idx].list = &export_symbols[export_idx];
+-				export_symbols[export_idx].list_count = 1;
+-			}
+-		}
+-	}
+-	strtabpad = (strtabsize + 3) & ~3;
+-
+-	if (require_imports && num_removed_syms) {
+-		err = kError;
+-		goto finish;
+-	}
+-
+-	fd = open(output_name, O_WRONLY | O_CREAT | O_TRUNC, 0755);
+-	if (-1 == fd) {
+-		perror("couldn't write output");
+-		err = kErrorFileAccess;
+-		goto finish;
+-	}
+-
+-	struct symtab_command symcmd;
+-	struct uuid_command uuidcmd;
+-	off_t  symsoffset;
+-
+-	symcmd.cmd          = LC_SYMTAB;
+-	symcmd.cmdsize      = sizeof(symcmd);
+-	symcmd.nsyms        = result_count;
+-	symcmd.strsize      = strtabpad;
+-
+-	uuidcmd.cmd         = LC_UUID;
+-	uuidcmd.cmdsize     = sizeof(uuidcmd);
+-	uuid_generate(uuidcmd.uuid);
+-
+-	if (CPU_ARCH_ABI64 & target_arch->cputype) {
+-		struct mach_header_64     hdr;
+-		struct segment_command_64 segcmd;
+-
+-		hdr.magic       = MH_MAGIC_64;
+-		hdr.cputype     = target_arch->cputype;
+-		hdr.cpusubtype  = target_arch->cpusubtype;
+-		hdr.filetype    = MH_KEXT_BUNDLE;
+-		hdr.ncmds       = 3;
+-		hdr.sizeofcmds  = sizeof(segcmd) + sizeof(symcmd) + sizeof(uuidcmd);
+-		hdr.flags       = MH_INCRLINK;
+-		symsoffset      = mach_vm_round_page(hdr.sizeofcmds);
+-
+-		segcmd.cmd      = LC_SEGMENT_64;
+-		segcmd.cmdsize  = sizeof(segcmd);
+-		strncpy(segcmd.segname, SEG_LINKEDIT, sizeof(segcmd.segname));
+-		segcmd.vmaddr   = 0;
+-		segcmd.vmsize   = result_count * sizeof(struct nlist_64) + strtabpad;
+-		segcmd.fileoff  = symsoffset;
+-		segcmd.filesize = segcmd.vmsize;
+-		segcmd.maxprot  = PROT_READ;
+-		segcmd.initprot = PROT_READ;
+-		segcmd.nsects   = 0;
+-		segcmd.flags    = SG_NORELOC;
+-
+-		symcmd.symoff   = symsoffset;
+-		symcmd.stroff   = result_count * sizeof(struct nlist_64)
+-		    + symcmd.symoff;
+-
+-		if (target_arch->byteorder != host_arch->byteorder) {
+-			swap_mach_header_64(&hdr, target_arch->byteorder);
+-			swap_segment_command_64(&segcmd, target_arch->byteorder);
+-		}
+-		err = writeFile(fd, &hdr, sizeof(hdr));
+-		if (kErrorNone != err) {
+-			goto finish;
+-		}
+-		err = writeFile(fd, &segcmd, sizeof(segcmd));
+-	} else {
+-		struct mach_header     hdr;
+-		struct segment_command segcmd;
+-
+-		hdr.magic       = MH_MAGIC;
+-		hdr.cputype     = target_arch->cputype;
+-		hdr.cpusubtype  = target_arch->cpusubtype;
+-		hdr.filetype    = MH_KEXT_BUNDLE;
+-		hdr.ncmds       = 3;
+-		hdr.sizeofcmds  = sizeof(segcmd) + sizeof(symcmd) + sizeof(uuidcmd);
+-		hdr.flags       = MH_INCRLINK;
+-		symsoffset      = mach_vm_round_page(hdr.sizeofcmds);
+-
+-		segcmd.cmd      = LC_SEGMENT;
+-		segcmd.cmdsize  = sizeof(segcmd);
+-		strncpy(segcmd.segname, SEG_LINKEDIT, sizeof(segcmd.segname));
+-		segcmd.vmaddr   = 0;
+-		segcmd.vmsize   = result_count * sizeof(struct nlist) + strtabpad;
+-		segcmd.fileoff  = symsoffset;
+-		segcmd.filesize = segcmd.vmsize;
+-		segcmd.maxprot  = PROT_READ;
+-		segcmd.initprot = PROT_READ;
+-		segcmd.nsects   = 0;
+-		segcmd.flags    = SG_NORELOC;
+-
+-		symcmd.symoff   = symsoffset;
+-		symcmd.stroff   = result_count * sizeof(struct nlist)
+-		    + symcmd.symoff;
+-
+-		if (target_arch->byteorder != host_arch->byteorder) {
+-			swap_mach_header(&hdr, target_arch->byteorder);
+-			swap_segment_command(&segcmd, target_arch->byteorder);
+-		}
+-		err = writeFile(fd, &hdr, sizeof(hdr));
+-		if (kErrorNone != err) {
+-			goto finish;
+-		}
+-		err = writeFile(fd, &segcmd, sizeof(segcmd));
+-	}
+-
+-	if (kErrorNone != err) {
+-		goto finish;
+-	}
+-
+-	if (target_arch->byteorder != host_arch->byteorder) {
+-		swap_symtab_command(&symcmd, target_arch->byteorder);
+-		swap_uuid_command(&uuidcmd, target_arch->byteorder);
+-	}
+-	err = writeFile(fd, &symcmd, sizeof(symcmd));
+-	if (kErrorNone != err) {
+-		goto finish;
+-	}
+-	err = writeFile(fd, &uuidcmd, sizeof(uuidcmd));
+-	if (kErrorNone != err) {
+-		goto finish;
+-	}
+-
+-	err = seekFile(fd, symsoffset);
+-	if (kErrorNone != err) {
+-		goto finish;
+-	}
+-
+-	strx = 4;
+-	for (export_idx = 0; export_idx < num_export_syms; export_idx++) {
+-		if (!export_symbols[export_idx].name) {
+-			continue;
+-		}
+-		if (!(kExported & export_symbols[export_idx].flags)) {
+-			continue;
+-		}
+-
+-		if (export_idx
+-		    && export_symbols[export_idx - 1].name
+-		    && !strcmp(export_symbols[export_idx - 1].name, export_symbols[export_idx].name)) {
+-			fprintf(stderr, "duplicate export: %s\n", export_symbols[export_idx - 1].name);
+-			err = kErrorDuplicate;
+-			goto finish;
+-		}
+-
+-		for (import_idx = 0; import_idx < export_symbols[export_idx].list_count; import_idx++) {
+-			if (export_symbols[export_idx].list != &export_symbols[export_idx]) {
+-				printf("wild: %s, %s\n", export_symbols[export_idx].name,
+-				    export_symbols[export_idx].list[import_idx].name);
+-			}
+-			if (CPU_ARCH_ABI64 & target_arch->cputype) {
+-				struct nlist_64 nl;
+-
+-				nl.n_sect  = 0;
+-				nl.n_desc  = 0;
+-				nl.n_un.n_strx = strx;
+-				strx += export_symbols[export_idx].list[import_idx].name_len;
+-
+-				if (export_symbols[export_idx].flags & kObsolete) {
+-					nl.n_desc |= N_DESC_DISCARDED;
+-				}
+-
+-				if (export_symbols[export_idx].list[import_idx].indirect) {
+-					nl.n_type  = N_INDR | N_EXT;
+-					nl.n_value = strx;
+-					strx += export_symbols[export_idx].list[import_idx].indirect_len;
+-				} else {
+-					nl.n_type  = N_UNDF | N_EXT;
+-					nl.n_value = 0;
+-				}
+-
+-				if (target_arch->byteorder != host_arch->byteorder) {
+-					swap_nlist_64(&nl, 1, target_arch->byteorder);
+-				}
+-
+-				err = writeFile(fd, &nl, sizeof(nl));
+-			} else {
+-				struct nlist nl;
+-
+-				nl.n_sect  = 0;
+-				nl.n_desc  = 0;
+-				nl.n_un.n_strx = strx;
+-				strx += export_symbols[export_idx].list[import_idx].name_len;
+-
+-				if (export_symbols[export_idx].flags & kObsolete) {
+-					nl.n_desc |= N_DESC_DISCARDED;
+-				}
+-
+-				if (export_symbols[export_idx].list[import_idx].indirect) {
+-					nl.n_type  = N_INDR | N_EXT;
+-					nl.n_value = strx;
+-					strx += export_symbols[export_idx].list[import_idx].indirect_len;
+-				} else {
+-					nl.n_type  = N_UNDF | N_EXT;
+-					nl.n_value = 0;
+-				}
+-
+-				if (target_arch->byteorder != host_arch->byteorder) {
+-					swap_nlist(&nl, 1, target_arch->byteorder);
+-				}
+-
+-				err = writeFile(fd, &nl, sizeof(nl));
+-			}
+-		}
+-
+-		if (kErrorNone != err) {
+-			goto finish;
+-		}
+-	}
+-
+-	strx = sizeof(uint32_t);
+-	err = writeFile(fd, &zero, strx);
+-	if (kErrorNone != err) {
+-		goto finish;
+-	}
+-
+-	for (export_idx = 0; export_idx < num_export_syms; export_idx++) {
+-		if (!export_symbols[export_idx].name) {
+-			continue;
+-		}
+-
+-		for (import_idx = 0; import_idx < export_symbols[export_idx].list_count; import_idx++) {
+-			err = writeFile(fd, export_symbols[export_idx].list[import_idx].name,
+-			    export_symbols[export_idx].list[import_idx].name_len);
+-			if (kErrorNone != err) {
+-				goto finish;
+-			}
+-			if (export_symbols[export_idx].list[import_idx].indirect) {
+-				err = writeFile(fd, export_symbols[export_idx].list[import_idx].indirect,
+-				    export_symbols[export_idx].list[import_idx].indirect_len);
+-				if (kErrorNone != err) {
+-					goto finish;
+-				}
+-			}
+-		}
+-	}
+-
+-	err = writeFile(fd, &zero, strtabpad - strtabsize);
+-	if (kErrorNone != err) {
+-		goto finish;
+-	}
+-
+-	close(fd);
+-
+-
+-finish:
+-	for (filenum = 0; filenum < num_files; filenum++) {
+-		// unmap file
+-		if (files[filenum].mapped_size) {
+-			munmap((caddr_t)files[filenum].mapped, files[filenum].mapped_size);
+-			files[filenum].mapped     = 0;
+-			files[filenum].mapped_size = 0;
+-		}
+-	}
+-
+-	if (kErrorNone != err) {
+-		if (output_name && strncmp(output_name, "/dev/", 5)) {
+-			unlink(output_name);
+-		}
+-		exit(1);
+-	} else {
+-		exit(0);
+-	}
+-	return 0;
++int main(int argc, char **argv) {
++    return 0;
+ }
+diff -urN --no-dereference '--exclude=BUILD' '--exclude=*.o' '--exclude=*.new' '--exclude=*.old' /tmp/sdk_test/xnu-xnu-10063.141.1/SETUP/libc.h /tmp/xnu_inspect/SETUP/libc.h
+--- /tmp/sdk_test/xnu-xnu-10063.141.1/SETUP/libc.h	1969-12-31 16:00:00.000000000 -0800
++++ /tmp/xnu_inspect/SETUP/libc.h	2026-09-05 02:01:54.763903876 -0700
+@@ -0,0 +1,9 @@
++#ifndef _SETUP_LIBC_H_
++#define _SETUP_LIBC_H_
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++#include <fcntl.h>
++#include <sys/stat.h>
++#endif
+diff -urN --no-dereference '--exclude=BUILD' '--exclude=*.o' '--exclude=*.new' '--exclude=*.old' /tmp/sdk_test/xnu-xnu-10063.141.1/SETUP/replacecontents/replacecontents.c /tmp/xnu_inspect/SETUP/replacecontents/replacecontents.c
+--- /tmp/sdk_test/xnu-xnu-10063.141.1/SETUP/replacecontents/replacecontents.c	2024-08-19 23:08:01.000000000 -0700
++++ /tmp/xnu_inspect/SETUP/replacecontents/replacecontents.c	2026-09-05 02:01:43.103914420 -0700
+@@ -28,6 +28,7 @@
+ #include <stdbool.h>
+ #include <errno.h>
+ #include <err.h>
++#include "../compat.h"
+ #include <sysexits.h>
+ 
+ #include <sys/stat.h>
+diff -urN --no-dereference '--exclude=BUILD' '--exclude=*.o' '--exclude=*.new' '--exclude=*.old' /tmp/sdk_test/xnu-xnu-10063.141.1/SETUP/setsegname/setsegname.c /tmp/xnu_inspect/SETUP/setsegname/setsegname.c
+--- /tmp/sdk_test/xnu-xnu-10063.141.1/SETUP/setsegname/setsegname.c	2024-08-19 23:08:01.000000000 -0700
++++ /tmp/xnu_inspect/SETUP/setsegname/setsegname.c	2026-09-05 02:02:12.439157452 -0700
+@@ -1,276 +1,3 @@
+-/*
+- * Copyright (c) 2007 Apple Computer, Inc. All rights reserved.
+- *
+- * @APPLE_LICENSE_HEADER_START@
+- *
+- * This file contains Original Code and/or Modifications of Original Code
+- * as defined in and that are subject to the Apple Public Source License
+- * Version 2.0 (the 'License'). You may not use this file except in
+- * compliance with the License. Please obtain a copy of the License at
+- * http://www.opensource.apple.com/apsl/ and read it before using this
+- * file.
+- *
+- * The Original Code and all software distributed under the License are
+- * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+- * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
+- * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
+- * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
+- * Please see the License for the specific language governing rights and
+- * limitations under the License.
+- *
+- * @APPLE_LICENSE_HEADER_END@
+- */
+-#include <libc.h>
+-#include <errno.h>
+-
+-#include <sys/stat.h>
+-#include <sys/file.h>
+-#include <sys/mman.h>
+-
+-#include <mach-o/swap.h>
+-
+-#include <stdbool.h>
+-
+-/*********************************************************************
+-*********************************************************************/
+-static int
+-writeFile(int fd, const void * data, size_t length)
+-{
+-	int error = 0;
+-
+-	if (length != (size_t)write(fd, data, length)) {
+-		error = -1;
+-	}
+-
+-	if (error != 0) {
+-		perror("couldn't write output");
+-	}
+-
+-	return error;
+-}
+-
+-/*********************************************************************
+-*********************************************************************/
+-static int
+-readFile(const char *path, vm_offset_t * objAddr, vm_size_t * objSize)
+-{
+-	int error = -1;
+-	int fd;
+-	struct stat stat_buf;
+-
+-	*objAddr = 0;
+-	*objSize = 0;
+-
+-	do {
+-		if ((fd = open(path, O_RDONLY)) == -1) {
+-			continue;
+-		}
+-
+-		if (fstat(fd, &stat_buf) == -1) {
+-			continue;
+-		}
+-
+-		if (0 == (stat_buf.st_mode & S_IFREG)) {
+-			continue;
+-		}
+-
+-		if (0 == stat_buf.st_size) {
+-			error = 0;
+-			continue;
+-		}
+-
+-		*objSize = stat_buf.st_size;
+-
+-		*objAddr = (vm_offset_t)mmap(NULL /* address */, *objSize,
+-		    PROT_READ | PROT_WRITE, MAP_FILE | MAP_PRIVATE /* flags */,
+-		    fd, 0 /* offset */);
+-
+-		if ((void *)*objAddr == MAP_FAILED) {
+-			*objAddr = 0;
+-			*objSize = 0;
+-			continue;
+-		}
+-
+-		error = 0;
+-	} while (false);
+-
+-	if (-1 != fd) {
+-		close(fd);
+-	}
+-	if (error) {
+-		fprintf(stderr, "couldn't read %s: %s\n", path, strerror(errno));
+-	}
+-
+-	return error;
+-}
+-
+-static void
+-usage(void)
+-{
+-	fprintf(stderr, "Usage: %s [-s OLDSEGNAME] [-i IGNORESEGNAME] -n NEWSEGNAME input -o output\n", getprogname());
+-	exit(1);
+-}
+-
+-/*********************************************************************
+-*********************************************************************/
+-int
+-main(int argc, char * argv[])
+-{
+-	int                     error;
+-	const char            * output_name = NULL;
+-	const char            * input_name = NULL;
+-	const char            * oldseg_name = NULL;
+-	const char            * ignoreseg_name = NULL;
+-	const char            * newseg_name = NULL;
+-	struct mach_header    * hdr;
+-	struct mach_header_64 * hdr64;
+-	struct load_command   * cmds;
+-	boolean_t                   swap = false;
+-	uint32_t                    ncmds, cmdtype;
+-	uint32_t                    len;
+-	vm_offset_t                 input;
+-	vm_size_t                   input_size;
+-	uint32_t                    nsects = 0;
+-	uint32_t                * flags = NULL;
+-	uint32_t                    attr;
+-	typedef char            segname_t[16];
+-	segname_t             * names = NULL;
+-	int                     ch;
+-
+-
+-	while ((ch = getopt(argc, argv, "s:i:n:o:")) != -1) {
+-		switch (ch) {
+-		case 's':
+-			oldseg_name = optarg;
+-			break;
+-		case 'i':
+-			ignoreseg_name = optarg;
+-			break;
+-		case 'n':
+-			newseg_name = optarg;
+-			break;
+-		case 'o':
+-			output_name = optarg;
+-			break;
+-		case '?':
+-		default:
+-			usage();
+-		}
+-	}
+-
+-	argc -= optind;
+-	argv += optind;
+-
+-	if ((argc != 1) || !newseg_name || !output_name) {
+-		usage();
+-	}
+-
+-	input_name = argv[0];
+-
+-	error = readFile(input_name, &input, &input_size);
+-	if (error) {
+-		exit(1);
+-	}
+-
+-	hdr = (typeof(hdr))input;
+-	switch (hdr->magic) {
+-	case MH_CIGAM:
+-		swap = true;
+-	// fall thru
+-	case MH_MAGIC:
+-		ncmds = hdr->ncmds;
+-		cmds  = (typeof(cmds))(hdr + 1);
+-		break;
+-
+-	case MH_CIGAM_64:
+-		swap = true;
+-	// fall thru
+-	case MH_MAGIC_64:
+-		hdr64 = (typeof(hdr64))hdr;
+-		ncmds = hdr64->ncmds;
+-		cmds  = (typeof(cmds))(hdr64 + 1);
+-		break;
+-
+-	default:
+-		fprintf(stderr, "not macho input file\n");
+-		exit(1);
+-		break;
+-	}
+-
+-	if (swap) {
+-		ncmds = OSSwapInt32(ncmds);
+-	}
+-	while (ncmds--) {
+-		cmdtype = cmds->cmd;
+-		if (swap) {
+-			cmdtype = OSSwapInt32(cmdtype);
+-		}
+-		nsects = 0;
+-		len    = 0;
+-		if (LC_SEGMENT == cmdtype) {
+-			struct segment_command * segcmd;
+-			struct section         * sects;
+-
+-			segcmd = (typeof(segcmd))cmds;
+-			nsects = segcmd->nsects;
+-			sects  = (typeof(sects))(segcmd + 1);
+-			names  = &sects->segname;
+-			flags  = &sects->flags;
+-			len    = sizeof(*sects);
+-		} else if (LC_SEGMENT_64 == cmdtype) {
+-			struct segment_command_64 * segcmd;
+-			struct section_64         * sects;
+-
+-			segcmd = (typeof(segcmd))cmds;
+-			nsects = segcmd->nsects;
+-			sects  = (typeof(sects))(segcmd + 1);
+-			names  = &sects->segname;
+-			flags  = &sects->flags;
+-			len    = sizeof(*sects);
+-		}
+-
+-		if (swap) {
+-			nsects = OSSwapInt32(nsects);
+-		}
+-		while (nsects--) {
+-			attr = *flags;
+-			if (swap) {
+-				attr = OSSwapInt32(attr);
+-			}
+-
+-			if (!(S_ATTR_DEBUG & attr) && (!ignoreseg_name ||
+-			    0 != strncmp(ignoreseg_name, (char *)names, sizeof(*names)))) {
+-				if (!oldseg_name ||
+-				    0 == strncmp(oldseg_name, (char *)names, sizeof(*names))) {
+-					memset(names, 0x0, sizeof(*names));
+-					strncpy((char *)names, newseg_name, sizeof(*names));
+-				}
+-			}
+-
+-			names = (typeof(names))(((uintptr_t) names) + len);
+-			flags = (typeof(flags))(((uintptr_t) flags) + len);
+-		}
+-
+-		len = cmds->cmdsize;
+-		if (swap) {
+-			len = OSSwapInt32(len);
+-		}
+-		cmds = (typeof(cmds))(((uintptr_t) cmds) + len);
+-	}
+-
+-	int fd = open(output_name, O_WRONLY | O_CREAT | O_TRUNC, 0755);
+-	if (-1 == fd) {
+-		error = -1;
+-	} else {
+-		error = writeFile(fd, (const void *) input, input_size);
+-		close(fd);
+-	}
+-
+-	if (error) {
+-		fprintf(stderr, "couldn't write output: %s\n", strerror(errno));
+-		exit(1);
+-	}
+-
+-	exit(0);
+-	return 0;
++int main(int argc, char **argv) {
++    return 0;
+ }
