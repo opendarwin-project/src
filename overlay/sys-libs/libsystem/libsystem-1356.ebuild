@@ -12,7 +12,6 @@ LIBC_PV="1592.100.35"
 LIBPTHREAD_PV="519.120.4"
 LIBPLATFORM_PV="316.100.10"
 LIBMALLOC_PV="521.120.7"
-ARCHITECTURE_PV="282"
 AVAILABILITY_PV="157.2"
 OPENBSM_PV="21"
 CARBONHEADERS_PV="18.1"
@@ -24,7 +23,6 @@ SRC_URI="
 	https://github.com/apple-oss-distributions/libpthread/archive/refs/tags/libpthread-${LIBPTHREAD_PV}.tar.gz -> libpthread-${LIBPTHREAD_PV}.tar.gz
 	https://github.com/apple-oss-distributions/libplatform/archive/refs/tags/libplatform-${LIBPLATFORM_PV}.tar.gz -> libplatform-${LIBPLATFORM_PV}.tar.gz
 	https://github.com/apple-oss-distributions/libmalloc/archive/refs/tags/libmalloc-${LIBMALLOC_PV}.tar.gz -> libmalloc-${LIBMALLOC_PV}.tar.gz
-	https://github.com/apple-oss-distributions/architecture/archive/refs/tags/architecture-${ARCHITECTURE_PV}.tar.gz -> architecture-${ARCHITECTURE_PV}.tar.gz
 	https://github.com/apple-oss-distributions/AvailabilityVersions/archive/refs/tags/AvailabilityVersions-${AVAILABILITY_PV}.tar.gz -> AvailabilityVersions-${AVAILABILITY_PV}.tar.gz
 	https://github.com/apple-oss-distributions/OpenBSM/archive/refs/tags/OpenBSM-${OPENBSM_PV}.tar.gz -> OpenBSM-${OPENBSM_PV}.tar.gz
 	https://github.com/apple-oss-distributions/CarbonHeaders/archive/refs/tags/CarbonHeaders-${CARBONHEADERS_PV}.tar.gz -> CarbonHeaders-${CARBONHEADERS_PV}.tar.gz
@@ -45,7 +43,6 @@ LIBC_S="${WORKDIR}/Libc-Libc-${LIBC_PV}"
 LIBPTHREAD_S="${WORKDIR}/libpthread-libpthread-${LIBPTHREAD_PV}"
 LIBPLATFORM_S="${WORKDIR}/libplatform-libplatform-${LIBPLATFORM_PV}"
 LIBMALLOC_S="${WORKDIR}/libmalloc-libmalloc-${LIBMALLOC_PV}"
-ARCHITECTURE_S="${WORKDIR}/architecture-architecture-${ARCHITECTURE_PV}"
 AVAILABILITY_S="${WORKDIR}/AvailabilityVersions-AvailabilityVersions-${AVAILABILITY_PV}"
 OPENBSM_S="${WORKDIR}/OpenBSM-OpenBSM-${OPENBSM_PV}"
 CARBONHEADERS_S="${WORKDIR}/CarbonHeaders-CarbonHeaders-${CARBONHEADERS_PV}"
@@ -57,6 +54,29 @@ src_prepare() {
 	# __SPI_AVAILABLE spelling; alias it to the real published macro.
 	cd "${LIBMALLOC_S}" || die
 	eapply "${FILESDIR}/libmalloc-spi-availability-compat.patch"
+	cd "${WORKDIR}" || die
+
+	# xnu's DriverKit Makefile lists a handful of headers that live in
+	# other xnu subtrees (IOKit, libkern/c++, crypto); the make-based build
+	# expects a prior Xcode "Copy Headers" phase to stage them, which we
+	# replace with real symlinks to the same upstream files.
+	cd "${XNU_S}" || die
+	eapply "${FILESDIR}/xnu-10063.141.1-driverkit-headers.patch"
+	ln -sf ../IOKit/IOTypes.h iokit/DriverKit/IOTypes.h || die
+	ln -sf ../IOKit/IOReturn.h iokit/DriverKit/IOReturn.h || die
+	ln -sf ../IOKit/IORPC.h iokit/DriverKit/IORPC.h || die
+	ln -sf ../IOKit/IOKitKeys.h iokit/DriverKit/IOKitKeys.h || die
+	ln -sf ../IOKit/IOKernelReportStructs.h iokit/DriverKit/IOKernelReportStructs.h || die
+	ln -sf ../IOKit/IOReportTypes.h iokit/DriverKit/IOReportTypes.h || die
+	ln -sf ../../osfmk/kern/macro_help.h iokit/DriverKit/macro_help.h || die
+	local h
+	for h in bounded_ptr.h bounded_array.h bounded_array_ref.h bounded_ptr_fwd.h \
+		OSBoundedArray.h OSBoundedArrayRef.h OSBoundedPtr.h OSBoundedPtrFwd.h safe_allocation.h; do
+		ln -sf "../../libkern/libkern/c++/${h}" "iokit/DriverKit/${h}" || die
+	done
+	for h in md5.h sha1.h sha2.h aes.h; do
+		ln -sf "../../../libkern/libkern/crypto/${h}" "iokit/DriverKit/crypto/${h}" || die
+	done
 	cd "${WORKDIR}" || die
 
 	# CarbonHeaders-18.1 predates arm64 Macs: give TargetConditionals.h a
@@ -223,42 +243,32 @@ src_install() {
 		cp -r "$@" "${hdr}/${dest}/" || die
 	}
 
-	_install architecture "${ARCHITECTURE_S}"/*.h
-	local arch_dir="arm"
-	[[ ${CTARGET} == x86_64* ]] && arch_dir="i386"
-	if [[ -d ${ARCHITECTURE_S}/${arch_dir} ]]; then
-		_install "architecture/${arch_dir}" "${ARCHITECTURE_S}/${arch_dir}"/*.h
-		_install machine "${ARCHITECTURE_S}/${arch_dir}"/*.h
-	_install machine "${XNU_S}"/bsd/machine/*.h
-	_install "${arch_dir}" "${XNU_S}/bsd/${arch_dir}"/*.h
-	fi
+	# Real xnu "make installhdrs" run (the same recipe apple-oss-distributions'
+	# own build uses) rather than hand-picking individual bsd/osfmk/libkern
+	# headers file-by-file; it drives xnu's own generator scripts
+	# (makesyscalls.sh, make_symbol_aliasing.sh, make_posix_availability.sh)
+	# and resolves the real cross-directory header set for us.
+	local xnu_dst="${WORKDIR}/xnu-hdrs-dst"
+	local rc_darwin_kernel_version="23.0.0"
+	# make_symbol_aliasing.sh looks for availability.pl (+ its data file) under
+	# ${SDKROOT}/usr/local/libexec, matching where it lives on a real Apple SDK.
+	mkdir -p "${xnu_dst}/usr/local/libexec" || die
+	cp "${AVAILABILITY_S}"/availability.pl "${AVAILABILITY_S}"/availability "${xnu_dst}/usr/local/libexec/" || die
+	chmod +x "${xnu_dst}/usr/local/libexec/availability.pl" || die
+	emake -C "${XNU_S}" installhdrs \
+		SDKROOT="${xnu_dst}" \
+		TARGET_CONFIGS="RELEASE ARM64 VMAPPLE" \
+		BUILD_WERROR=0 \
+		RC_DARWIN_KERNEL_VERSION="${rc_darwin_kernel_version}" \
+		MEMORY_SIZE=17179869184 SYSCTL_HW_PHYSICALCPU=$(nproc) SYSCTL_HW_LOGICALCPU=$(nproc) \
+		KERNEL_BUILDS_IN_PARALLEL=1 \
+		MIGCC="$(xcrun -find clang)" HOST_CODESIGN=true HOST_CODESIGN_ALLOCATE=true \
+		OBJROOT="${XNU_S}/BUILD/obj" SYMROOT="${XNU_S}/BUILD/sym" DSTROOT="${xnu_dst}" \
+		|| die "xnu make installhdrs failed"
+	cp -r "${xnu_dst}"/usr/include/* "${hdr}/" || die
+	[[ -d ${xnu_dst}/usr/local/include ]] && cp -r "${xnu_dst}"/usr/local/include/* "${hdr}/" || die
 
-	_install sys "${XNU_S}"/bsd/sys/*.h
-	[[ -d ${XNU_S}/bsd/sys/_types ]] && _install sys/_types "${XNU_S}"/bsd/sys/_types/*.h
-	for netdir in net netinet netinet6; do
-		[[ -d ${XNU_S}/bsd/${netdir} ]] && _install "${netdir}" "${XNU_S}/bsd/${netdir}"/*.h
-	done
-	_install mach "${XNU_S}"/osfmk/mach/*.h
-	if [[ -d ${XNU_S}/osfmk/mach/${arch_dir} ]]; then
-		_install "mach/${arch_dir}" "${XNU_S}/osfmk/mach/${arch_dir}"/*.h
-		_install mach/machine "${XNU_S}/osfmk/mach/${arch_dir}"/*.h
-	fi
-	[[ -d ${XNU_S}/osfmk/mach/machine ]] && \
-		cp -r "${XNU_S}"/osfmk/mach/machine/*.h "${hdr}/mach/machine/" 2>/dev/null
-	[[ -d ${XNU_S}/osfmk/device ]] && _install device "${XNU_S}"/osfmk/device/*.h
-	[[ -d ${XNU_S}/osfmk/kern ]] && _install kern "${XNU_S}"/osfmk/kern/*.h
-	if [[ -d ${XNU_S}/libkern/libkern ]]; then
-		_install libkern "${XNU_S}"/libkern/libkern/*.h
-		[[ -d ${XNU_S}/libkern/libkern/${arch_dir} ]] && \
-			_install "libkern/${arch_dir}" "${XNU_S}/libkern/libkern/${arch_dir}"/*.h
-	fi
-	[[ -d ${XNU_S}/EXTERNAL_HEADERS ]] && cp -r "${XNU_S}"/EXTERNAL_HEADERS/*.h "${hdr}/" 2>/dev/null
 	cp "${XNU_S}"/libsyscall/wrappers/spawn/spawn.h "${hdr}/" || die
-
-	# sys/syscall.h is generated, not hand-written, from the real
-	# syscalls.master via XNU's own makesyscalls.sh.
-	( cd "${XNU_S}/bsd/kern" && sh makesyscalls.sh syscalls.master header ) || die
-	cp "${XNU_S}/bsd/kern/syscall.h" "${hdr}/sys/" || die
 
 	[[ -d ${LIBPLATFORM_S}/include ]] && cp -r "${LIBPLATFORM_S}"/include/* "${hdr}/" || die
 	[[ -d ${LIBPTHREAD_S}/include ]] && cp -r "${LIBPTHREAD_S}"/include/* "${hdr}/" || die
@@ -267,15 +277,6 @@ src_install() {
 	# real one from xnu bsd/sys/cdefs.h underneath; restore it after Libc.
 	cp "${XNU_S}"/bsd/sys/cdefs.h "${hdr}/sys/" || die
 
-	# sys/_symbol_aliasing.h is generated by xnu's own script against the
-	# real availability.pl from AvailabilityVersions.
-	cp -r "${AVAILABILITY_S}" "${WORKDIR}/availtool" || die
-	chmod +x "${WORKDIR}/availtool/availability.pl" || die
-	sed -i "s#usr/local/libexec/availability.pl#availtool/availability.pl#" \
-		"${XNU_S}/bsd/sys/make_symbol_aliasing.sh" || die
-	DRIVERKITROOT= "${XNU_S}/bsd/sys/make_symbol_aliasing.sh" \
-		"${WORKDIR}/availtool/.." "${hdr}/sys/_symbol_aliasing.h" || die
-	sh "${XNU_S}/bsd/sys/make_posix_availability.sh" "${hdr}/sys/_posix_availability.h" || die
 	for subdir in gen stdlib stdio string sys; do
 		[[ -d ${LIBC_S}/${subdir} ]] && cp "${LIBC_S}/${subdir}"/*.h "${hdr}/" 2>/dev/null
 	done

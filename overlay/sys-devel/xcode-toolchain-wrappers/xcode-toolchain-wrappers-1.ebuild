@@ -86,6 +86,10 @@ src_install() {
 	done
 
 	resolve_sdkroot() {
+		if [[ -n "$SDK_NAME" && -d "$SDK_NAME" ]]; then
+			echo "$SDK_NAME"
+			return 0
+		fi
 		if [[ -n "$SDKROOT" && -d "$SDKROOT" ]]; then
 			echo "$SDKROOT"
 			return 0

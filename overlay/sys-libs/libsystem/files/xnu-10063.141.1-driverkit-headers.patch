@@ -1,0 +1,17 @@
+--- a/iokit/DriverKit/Makefile
++++ b/iokit/DriverKit/Makefile
+@@ -41,12 +41,12 @@
+ 
+ OTHER_HEADERS = IOTypes.h IOReturn.h IORPC.h IOKitKeys.h \
+ 				IOKernelReportStructs.h IOReportTypes.h \
+-				queue_implementation.h macro_help.h \
++				macro_help.h \
+ 				bounded_ptr.h bounded_array.h bounded_array_ref.h bounded_ptr_fwd.h \
+ 				OSBoundedArray.h OSBoundedArrayRef.h OSBoundedPtr.h OSBoundedPtrFwd.h \
+ 				safe_allocation.h
+ 
+-EXPORT_MI_GEN_LIST = $(GENERATED_HEADERS)  $(OTHER_HEADERS)
++EXPORT_MI_GEN_LIST = $(GENERATED_HEADERS)
+ INSTALL_MI_GEN_LIST = $(GENERATED_HEADERS)  $(OTHER_HEADERS)
+ INSTALL_MI_LCL_GEN_LIST = $(GENERATED_HEADERS)  $(OTHER_HEADERS)
+ INSTALL_DRIVERKIT_MI_GEN_LIST = $(PUBLIC_GENERATED_HEADERS) $(OTHER_HEADERS)
