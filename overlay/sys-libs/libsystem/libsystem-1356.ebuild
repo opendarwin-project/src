@@ -272,6 +272,7 @@ src_install() {
 		"${XNU_S}/bsd/sys/make_symbol_aliasing.sh" || die
 	DRIVERKITROOT= "${XNU_S}/bsd/sys/make_symbol_aliasing.sh" \
 		"${WORKDIR}/availtool/.." "${hdr}/sys/_symbol_aliasing.h" || die
+	sh "${XNU_S}/bsd/sys/make_posix_availability.sh" "${hdr}/sys/_posix_availability.h" || die
 	for subdir in gen stdlib stdio string sys; do
 		[[ -d ${LIBC_S}/${subdir} ]] && cp "${LIBC_S}/${subdir}"/*.h "${hdr}/" 2>/dev/null
 	done
