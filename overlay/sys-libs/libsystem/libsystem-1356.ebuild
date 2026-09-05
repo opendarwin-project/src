@@ -268,6 +268,7 @@ src_install() {
 	# real availability.pl from AvailabilityVersions.
 	mkdir -p "${WORKDIR}/availtool" || die
 	cp "${AVAILABILITY_S}"/availability.pl "${WORKDIR}/availtool/" || die
+	cp "${AVAILABILITY_S}"/availability "${WORKDIR}/availtool/" || die
 	chmod +x "${WORKDIR}/availtool/availability.pl" || die
 	sed -i "s#usr/local/libexec/availability.pl#availtool/availability.pl#" \
 		"${XNU_S}/bsd/sys/make_symbol_aliasing.sh" || die
