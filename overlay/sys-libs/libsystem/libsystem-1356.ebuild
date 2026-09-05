@@ -229,6 +229,8 @@ src_install() {
 	if [[ -d ${ARCHITECTURE_S}/${arch_dir} ]]; then
 		_install "architecture/${arch_dir}" "${ARCHITECTURE_S}/${arch_dir}"/*.h
 		_install machine "${ARCHITECTURE_S}/${arch_dir}"/*.h
+	_install machine "${XNU_S}"/bsd/machine/*.h
+	_install "${arch_dir}" "${XNU_S}/bsd/${arch_dir}"/*.h
 	fi
 
 	_install sys "${XNU_S}"/bsd/sys/*.h
