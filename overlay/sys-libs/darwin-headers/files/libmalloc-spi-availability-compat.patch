@@ -1,0 +1,10 @@
+--- a/include/malloc/_malloc_type.h
++++ b/include/malloc/_malloc_type.h
+@@ -40,6 +40,7 @@
+ 
+ // Included from <malloc/_malloc.h> so carefully manage what we include here.
+ #include <Availability.h> /* __SPI_AVAILABLE */
++#include <spi-availability-compat.h>
+ #if __has_include(<sys/_types/_size_t.h>)
+ #include <sys/_types/_size_t.h>
+ #elif __has_include(<_liblibc/_size_t.h>)
