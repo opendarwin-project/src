@@ -1,4 +1,5 @@
 /sysroot
 /xnu
 /dev/xnu-meson-test
+/dev/dyld-src
 *.bin

@@ -76,7 +76,7 @@ def run(cmd: list[str], timeout: float, expect: str) -> int:
                     interrupted = True
                 if (not sent_boot) and "=> " in text:
                     boot = (
-                        f"setenv bootargs 'rd=md0 -v serial=3 debug=0x14e keepsyms=1'\r"
+                        f"setenv bootargs 'rd=md0 -v serial=3 debug=0x14e keepsyms=1 cs_enforcement_disable=1 amfi_allow_any_signature=1'\r"
                         f"bootxnu {KERNEL_ADDR} {FDT_ADDR}\r"
                     )
                     os.write(fd, boot.encode())

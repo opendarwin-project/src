@@ -69,12 +69,14 @@ def build_afdt(
     ramdisk_size: int,
     boot_args: str,
     panic_log_phys: int = 0,
-    panic_log_size: int = 0,
+    panic_log_size: int = 0x80000,
 ) -> bytes:
+    if panic_log_phys == 0:
+        panic_log_phys = ram_base + ram_size - panic_log_size
     root = _node(
         [_prop("name", _str("device-tree"))],
         [
-            _chosen(ram_base, ram_size, ramdisk_phys, ramdisk_size, boot_args),
+            _chosen(ram_base, ram_size, ramdisk_phys, ramdisk_size, boot_args, panic_log_size),
             _defaults(),
             _arm_io(),
             _cpus(),
@@ -84,7 +86,14 @@ def build_afdt(
     return root
 
 
-def _chosen(ram_base: int, ram_size: int, ramdisk_phys: int, ramdisk_size: int, boot_args: str) -> bytes:
+def _chosen(
+    ram_base: int,
+    ram_size: int,
+    ramdisk_phys: int,
+    ramdisk_size: int,
+    boot_args: str,
+    panic_log_size: int = 0x80000,
+) -> bytes:
     random_seed = bytes(((i * 0x9D + 0x5A) & 0xFF) for i in range(256))
     memory_map = _node(
         [
@@ -102,8 +111,9 @@ def _chosen(ram_base: int, ram_size: int, ramdisk_phys: int, ramdisk_size: int, 
             _prop("system-firmware-version", _str("u-boot-bootxnu-0.1.0")),
             _prop("boot-args", _str(boot_args)),
             _prop("unique-chip-id", bytes([1, 2, 3, 4, 5, 6, 7, 8])),
-            _prop("embedded-panic-log-size", struct.pack("<I", 0)),
+            _prop("embedded-panic-log-size", struct.pack("<I", panic_log_size)),
             _prop("kernel-ctrr-to-be-enabled", struct.pack("<I", 0)),
+            _prop("debug-enabled", struct.pack("<I", 1)),
             _prop("random-seed", random_seed),
         ],
         [memory_map],
@@ -195,7 +205,7 @@ def main() -> None:
     p.add_argument("--ramdisk-size", default="0")
     p.add_argument("--boot-args", default=DEFAULT_BOOT_ARGS)
     p.add_argument("--panic-log-phys", default="0")
-    p.add_argument("--panic-log-size", default="0")
+    p.add_argument("--panic-log-size", default="0x80000")
     args = p.parse_args()
 
     size = int(args.ramdisk_size, 0)
@@ -203,6 +213,9 @@ def main() -> None:
         size = Path(args.ramdisk).stat().st_size
     if size <= 0:
         raise SystemExit("ramdisk size is 0")
+    # IOKitBSDInit truncates via >> 12 (4K pages) when calling mdevadd; round up
+    # to page boundary so the mockfs memory device covers the entire Mach-O
+    size = (size + 4095) & ~4095
 
     blob = build_afdt(
         int(args.ram_base, 0),
