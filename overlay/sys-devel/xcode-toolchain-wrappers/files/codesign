@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# No-op codesign for Linux hosts. XNU SETUP tools invoke
+# `env CODESIGN_ALLOCATE=... codesign -s - $@`.
+exit 0

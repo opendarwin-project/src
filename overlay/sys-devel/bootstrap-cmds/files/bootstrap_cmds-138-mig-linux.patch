@@ -1,0 +1,63 @@
+--- a/migcom.tproj/mig.sh	2026-09-05 04:37:01.182852994 -0700
++++ b/migcom.tproj/mig.sh	2026-09-05 04:37:01.182875782 -0700
+@@ -72,16 +72,19 @@
+ fi
+ 
+ if [ -z "${MIGCC}" ]; then
+-  xcrunPath="/usr/bin/xcrun"
++  xcrunPath="$(command -v xcrun)"
+   if [ -x "${xcrunPath}" ]; then
+     MIGCC=`"${xcrunPath}" -sdk "$sdkRoot" -find cc`
+   else
+     MIGCC=$(realpath "${scriptRoot}/cc")
+   fi
+ fi
++if [ -z "${MIGCC}" ]; then
++  MIGCC=$(command -v clang || command -v cc || true)
++fi
+ 
+ C=${MIGCC}
+-M=${MIGCOM-${migcomPath}}
++M=${MIGCOM:-${migcomPath}}
+ 
+ if [ $# -eq 1 ] && [ "$1" = "-version" ] ; then
+ 	"$M" "$@"
+@@ -90,8 +93,10 @@
+ 
+ cppflags="-D__MACH30__"
+ 
++mig_target="${MIG_TARGET:-${CTARGET:-arm64-apple-darwin}}"
++
+ files=
+-arch=`/usr/bin/arch`
++arch=`uname -m`
+ 
+ WORKTMP=`/usr/bin/mktemp -d "${TMPDIR:-/tmp}/mig.XXXXXX"`
+ if [ $? -ne 0 ]; then
+@@ -113,7 +118,12 @@
+ 	-sheader ) sheader="$2"; migflags=( "${migflags[@]}" "$1" "$2"); shift; shift;;
+ 	-iheader ) iheader="$2"; migflags=( "${migflags[@]}" "$1" "$2"); shift; shift;;
+ 	-dheader ) dheader="$2"; migflags=( "${migflags[@]}" "$1" "$2"); shift; shift;;
+-	-arch ) arch="$2"; shift; shift;;
++	-arch )
++		case "$2" in
++			arm64|aarch64) mig_target="${MIG_TARGET:-arm64-apple-darwin}" ;;
++			x86_64) mig_target="${MIG_TARGET:-x86_64-apple-darwin}" ;;
++		esac
++		shift; shift;;
+ 	-target ) target=( "$1" "$2"); shift; shift;;
+ 	-maxonstack ) migflags=( "${migflags[@]}" "$1" "$2"); shift; shift;;
+ 	-split ) migflags=( "${migflags[@]}" "$1" ); shift;;
+@@ -177,10 +187,10 @@
+     if [ -n "$MIG_TRACE_HEADERS" ]
+     then
+       env CC_PRINT_HEADERS_FORMAT=json CC_PRINT_HEADERS_FILTERING=only-direct-system CC_PRINT_HEADERS_FILE="$MIG_TRACE_HEADERS" \
+-        "$C" -E -arch ${arch} "${target[@]}" "${cppflags[@]}" -I "${sourcedir}" "${iSysRootParm[@]}" "${temp}.c" | "$M" "${migflags[@]}"
++        "$C" -E -target ${mig_target} "${target[@]}" "${cppflags[@]}" -I "${sourcedir}" "${iSysRootParm[@]}" "${temp}.c" | "$M" "${migflags[@]}"
+     else
+       env -u CC_PRINT_HEADERS_FORMAT \
+-        "$C" -E -arch ${arch} "${target[@]}" "${cppflags[@]}" -I "${sourcedir}" "${iSysRootParm[@]}" "${temp}.c" | "$M" "${migflags[@]}"
++        "$C" -E -target ${mig_target} "${target[@]}" "${cppflags[@]}" -I "${sourcedir}" "${iSysRootParm[@]}" "${temp}.c" | "$M" "${migflags[@]}"
+     fi
+     if [ $? -ne 0 ]
+     then

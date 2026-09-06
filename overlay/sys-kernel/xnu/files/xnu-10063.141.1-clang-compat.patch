@@ -1,0 +1,49 @@
+--- a/osfmk/kern/kalloc.h
++++ b/osfmk/kern/kalloc.h
+@@ -69,6 +69,24 @@
+ #include <kern/counter.h>
+ #endif /* XNU_KERNEL_PRIVATE */
+ 
++/*
++ * Apple Clang implements kalloc-type builtins that stock LLVM does not.
++ * Treat missing builtins as data-only / always-compatible so the real
++ * kalloc_type call sites still compile.
++ */
++#ifndef __has_builtin
++#define __has_builtin(x) 0
++#endif
++#if !__has_builtin(__builtin_xnu_type_summary)
++#define __builtin_xnu_type_summary(type) 0u
++#endif
++#if !__has_builtin(__builtin_xnu_type_signature)
++#define __builtin_xnu_type_signature(type) ""
++#endif
++#if !__has_builtin(__builtin_xnu_types_compatible)
++#define __builtin_xnu_types_compatible(a, b) 1
++#endif
++
+ __BEGIN_DECLS __ASSUME_PTR_ABI_SINGLE_BEGIN
+ 
+ /*!
+--- a/makedefs/MakeInc.def
++++ b/makedefs/MakeInc.def
+@@ -888,7 +888,7 @@
+ # Default runtime libraries to be linked with the kernel
+ #
+ LD_KERNEL_LIBS	   = -lcc_kext
+-LD_KERNEL_ARCHIVES = $(LDFLAGS_KERNEL_SDK) -lfirehose_kernel
++LD_KERNEL_ARCHIVES = $(LDFLAGS_KERNEL_SDK)
+ 
+ 
+ #
+--- a/osfmk/arm/pmap/pmap.h
++++ b/osfmk/arm/pmap/pmap.h
+@@ -473,7 +473,7 @@
+ #if HAS_APPLE_PAC
+ 	bool disable_jop;
+ #else
+-	bool reserved10;
++	bool reserved10_pac;
+ #endif /* HAS_APPLE_PAC */
+ 
+ 	bool reserved11;

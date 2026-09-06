@@ -33,7 +33,13 @@ src_prepare() {
 	cp "${FILESDIR}/mach_kern_return.h" "${inc}/mach/kern_return.h" || die
 	cp "${FILESDIR}/machine_limits.h" "${inc}/machine/limits.h" || die
 
+	# mig.sh hardcodes /usr/bin/xcrun and /usr/bin/arch and preprocesses its
+	# .defs input with "-arch $(uname -m)"; none of those work on a Linux
+	# cross host. Resolve xcrun via PATH and select the triple via CTARGET.
+	eapply "${FILESDIR}/bootstrap_cmds-138-mig-linux.patch"
+
 	sed -i 's/strbool( boolean_t bool )/strbool( boolean_t b )/g' "${S}/migcom.tproj/strdefs.h" || die
+
 	sed -i 's/strbool(boolean_t bool)/strbool(boolean_t b)/g; s/if (bool)/if (b)/g' "${S}/migcom.tproj/string.c" || die
 }
 
@@ -66,4 +72,6 @@ src_install() {
 
 	dobin "${S}/migcom.tproj/mig.sh"
 	mv "${ED}/usr/bin/mig.sh" "${ED}/usr/bin/mig" || die
+	# mig.sh and xcrun -find both look on PATH; the binary lives in libexec.
+	dosym ../libexec/migcom /usr/bin/migcom
 }

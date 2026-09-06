@@ -1,0 +1,714 @@
+--- a/Makefile	2024-08-19 23:08:01.000000000 -0700
++++ b/Makefile	2026-09-05 02:01:56.306756951 -0700
+@@ -143,8 +143,8 @@
+ 
+ else ifneq ($(findstring xnu_tests,$(RC_ProjectName)),)
+ 
+-export SYSCTL_HW_PHYSICALCPU := $(shell /usr/sbin/sysctl -n hw.physicalcpu)
+-export SYSCTL_HW_LOGICALCPU  := $(shell /usr/sbin/sysctl -n hw.logicalcpu)
++export SYSCTL_HW_PHYSICALCPU := $(shell sysctl -n hw.physicalcpu)
++export SYSCTL_HW_LOGICALCPU  := $(shell sysctl -n hw.logicalcpu)
+ MAKEJOBS := --jobs=$(shell expr $(SYSCTL_HW_LOGICALCPU) + 1)
+ 
+ default: install
+@@ -160,8 +160,8 @@
+ 
+ else ifeq ($(RC_ProjectName),xnu_tests_driverkit)
+ 
+-export SYSCTL_HW_PHYSICALCPU := $(shell /usr/sbin/sysctl -n hw.physicalcpu)
+-export SYSCTL_HW_LOGICALCPU  := $(shell /usr/sbin/sysctl -n hw.logicalcpu)
++export SYSCTL_HW_PHYSICALCPU := $(shell sysctl -n hw.physicalcpu)
++export SYSCTL_HW_LOGICALCPU  := $(shell sysctl -n hw.logicalcpu)
+ MAKEJOBS := --jobs=$(shell expr $(SYSCTL_HW_LOGICALCPU) + 1)
+ 
+ default: install
+@@ -193,8 +193,8 @@
+ # CPUs. If the system does not support SMT, use N+1.
+ # If MAKEJOBS or -jN is passed on the make line, that takes precedence.
+ #
+-export SYSCTL_HW_PHYSICALCPU := $(shell /usr/sbin/sysctl -n hw.physicalcpu)
+-export SYSCTL_HW_LOGICALCPU  := $(shell /usr/sbin/sysctl -n hw.logicalcpu)
++export SYSCTL_HW_PHYSICALCPU := $(shell sysctl -n hw.physicalcpu)
++export SYSCTL_HW_LOGICALCPU  := $(shell sysctl -n hw.logicalcpu)
+ MAKEJOBS := --jobs=$(shell expr $(SYSCTL_HW_LOGICALCPU) + 1)
+ 
+ TOP_TARGETS = \
+--- a/SETUP/compat.h	1969-12-31 16:00:00.000000000 -0800
++++ b/SETUP/compat.h	1969-12-31 16:00:00.000000000 -0800
+@@ -0,0 +1,53 @@
++#ifndef _SETUP_COMPAT_H_
++#define _SETUP_COMPAT_H_
++
++#ifndef _GNU_SOURCE
++#define _GNU_SOURCE
++#endif
++
++#include <errno.h>
++#include <unistd.h>
++
++#ifndef getprogname
++static inline const char *getprogname(void) {
++    extern const char *__progname;
++    return __progname ? __progname : "xnu-setup";
++}
++#endif
++
++#define COPYFILE_DATA (1<<1)
++
++static inline int fcopyfile(int srcfd, int dstfd, void *state, int flags) {
++    char buf[65536];
++    ssize_t n;
++    while ((n = read(srcfd, buf, sizeof(buf))) > 0) {
++        char *p = buf;
++        while (n > 0) {
++            ssize_t w = write(dstfd, p, n);
++            if (w < 0) {
++                if (errno == EINTR) continue;
++                return -1;
++            }
++            p += w;
++            n -= w;
++        }
++    }
++    return (n < 0) ? -1 : 0;
++}
++
++#endif
++
++#include <stdlib.h>
++static inline void *setmode(const char *mode_str) {
++    char *endptr;
++    long val = strtol(mode_str, &endptr, 8);
++    if (*endptr != '\0') return NULL;
++    long *m = malloc(sizeof(long));
++    if (m) *m = val;
++    return m;
++}
++
++static inline mode_t getmode(const void *bbox, mode_t omode) {
++    if (!bbox) return omode;
++    return (mode_t)(*(const long *)bbox);
++}
+--- a/SETUP/libc.h	1969-12-31 16:00:00.000000000 -0800
++++ b/SETUP/libc.h	1969-12-31 16:00:00.000000000 -0800
+@@ -0,0 +1,9 @@
++#ifndef _SETUP_LIBC_H_
++#define _SETUP_LIBC_H_
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++#include <fcntl.h>
++#include <sys/stat.h>
++#endif
+--- a/SETUP/config/doconf	2024-08-19 23:08:01.000000000 -0700
++++ b/SETUP/config/doconf	2026-09-05 02:11:40.493504991 -0700
+@@ -1,313 +1,185 @@
+-#!/bin/csh -f
+-set path = ($path .)
+-######################################################################
+-# HISTORY
+-#  1-Dec-87  Michael Young (mwyoung) at Carnegie-Mellon University
+-#	Added "-verbose" switch, so this script produces no output
+-#	in the normal case.
+-#
+-# 10-Oct-87  Mike Accetta (mja) at Carnegie-Mellon University
+-#	Flushed cmu_*.h and spin_locks.h
+-#	[ V5.1(XF18) ]
+-#
+-#  6-Apr-87  Avadis Tevanian (avie) at Carnegie-Mellon University
+-#	Use MASTER.local and MASTER.<machine>.local for generation of
+-#	configuration files in addition to MASTER and MASTER.<machine>.
+-#
+-# 25-Mar-87  Mike Accetta (mja) at Carnegie-Mellon University
+-#	Removed use of obsolete wb_*.h files when building the feature
+-#	list;  modified to save the previous configuration file and
+-#	display the differences between it and the new file.
+-#	[ V5.1(F8) ]
+-#
+-# 25-Mar-87  Avadis Tevanian (avie) at Carnegie-Mellon University
+-#	If there is no /etc/machine just print out a message telling
+-#	user to use the -cpu option.  I thought this script was supposed
+-#	to work even without a /etc/machine, but it doesn't... and this
+-#	is the easiest way out.
+-#
+-# 13-Mar-87  Mike Accetta (mja) at Carnegie-Mellon University
+-#	Added "romp_fpa.h" file to extra features for the RT.
+-#	[ V5.1(F7) ]
+-#
+-# 11-Mar-87  Mike Accetta (mja) at Carnegie-Mellon University
+-#	Updated to maintain the appropriate configuration features file
+-#	in the "machine" directory whenever the corresponding
+-#	configuration is generated.  This replaces the old mechanism of
+-#	storing this directly in the <sys/features.h> file since it was
+-#	machine dependent and also precluded building programs for more
+-#	than one configuration from the same set of sources.
+-#	[ V5.1(F6) ]
+-#
+-# 21-Feb-87  Mike Accetta (mja) at Carnegie-Mellon University
+-#	Fixed to require wired-in cpu type names for only those
+-#	machines where the kernel name differs from that provided by
+-#	/etc/machine (i.e. IBMRT => ca and SUN => sun3);  updated to
+-#	permit configuration descriptions in both machine indepedent
+-#	and dependent master configuration files so that attributes can
+-#	be grouped accordingly.
+-#	[ V5.1(F3) ]
+-#
+-# 17-Jan-87  Mike Accetta (mja) at Carnegie-Mellon University
+-#	Updated to work from any directory at the same level as
+-#	"conf"; generate configuration from both MASTER and
+-#	MASTER.<machine-type> files; added -cpu switch.
+-#	[ V5.1(F1) ]
+-#
+-# 18-Aug-86  Mike Accetta (mja) at Carnegie-Mellon University
+-#	Added -make switch and changed meaning of -config;  upgraded to
+-#	allow multiple attributes per configuration and to define
+-#	configurations in terms of these attributes within MASTER.
+-#
+-# 14-Apr-83  Mike Accetta (mja) at Carnegie-Mellon University
+-#	Added -config switch to only run /etc/config without 
+-#	"make depend" and "make".
+-#
+-######################################################################
+-
+-set prog=$0
+-set prog=$prog:t
+-set nonomatch
+-set OBJDIR=../BUILD
+-set SOURCEDIR=.
+-set CONFIG_DIR=$OBJROOT/SETUP/config
+-set MASTER_CONF_DIR=.
+-
+-set DEF_SEED=""
+-
+-
+-unset doconfig
+-unset beverbose
+-unset MACHINE
+-unset profile
+-unset SOC_CONFIG
+-unset PLATFORM
+-
+-while ($#argv >= 1)
+-    if ("$argv[1]" =~ -*) then
+-        switch ("$argv[1]")
+-	case "-c":
+-	case "-config":
+-	    set doconfig
+-	    breaksw
+-	case "-cpu":
+-	    if ($#argv < 2) then
+-		echo "${prog}: missing argument to ${argv[1]}"
+-		exit 1
+-	    endif
+-	    set MACHINE="$argv[2]"
+-	    shift
+-	    breaksw
+-	case "-soc":
+-	    if ($#argv < 2) then
+-		echo "${prog}: missing argument to ${argv[1]}"
+-		exit 1
+-	    endif
+-	    set SOC_CONFIG="$argv[2]"
+-	    if (`echo $SOC_CONFIG | awk '{print substr($0,0,2)}'` == "vm") then
+-	        set DEF_AVP="-DSOC_IS_VIRTUALIZED"
+-	    else
+-	        set DEF_AVP="-USOC_IS_VIRTUALIZED"
+-	    endif
+-	    shift
+-	    breaksw
+-	case "-platform":
+-	    if ($#argv < 2) then
+-		echo "${prog}: missing argument to ${argv[1]}"
+-		exit 1
+-	    endif
+-	    set PLATFORM="$argv[2]"
+-	    shift
+-	    breaksw
+-	case "-d":
+-	    if ($#argv < 2) then
+-		echo "${prog}: missing argument to ${argv[1]}"
+-		exit 1
+-	    endif
+-	    set OBJDIR="$argv[2]"
+-	    shift
+-	    breaksw
+-	case "-m":
+-	    if ($#argv < 2) then
+-		echo "${prog}: missing argument to ${argv[1]}"
+-		exit 1
+-	    endif
+-	    set MASTER_CONF_DIR="$argv[2]"
+-	    shift
+-	    breaksw
+-	case "-s":
+-	    if ($#argv < 2) then
+-		echo "${prog}: missing argument to ${argv[1]}"
+-		exit 1
+-	    endif
+-	    set SOURCEDIR="$argv[2]"
+-	    shift
+-	    breaksw
+-	case "-verbose":
+-	    set beverbose
+-	    breaksw
+-	case "-p":
+-	case "-profile":
+-	    set profile
+-	    breaksw
+-	default:
+-	    echo "${prog}: ${argv[1]}: unknown switch"
+-	    exit 1
+-	    breaksw
+-	endsw
+-	shift
+-    else
+-	break
+-    endif
+-end
+-
+-if ($#argv == 0) set argv=(GENERIC)
+-
+-if (! $?MACHINE) then
+-    echo "${prog}: MACHINE not set"
+-    exit 1
+-endif
+-
+-set cpu=`echo $MACHINE | tr A-Z a-z`
+-set ID=`echo $MACHINE | tr a-z A-Z`
+-set MASTER_DIR=${MASTER_CONF_DIR}
+-set MASTER =   ${MASTER_DIR}/MASTER
+-
+-foreach master_file (${MASTER}.${cpu}.${SOC_CONFIG}.${PLATFORM} ${MASTER}.${cpu}.${SOC_CONFIG} ${MASTER}.${cpu}.${PLATFORM} ${MASTER}.${cpu})
+-    if (-f $master_file) then
+-        set MASTER_CPU = $master_file
+-        break
+-    endif
+-end
+-
+-if ($?beverbose) then
+-    echo MASTER_CPU=$MASTER_CPU
+-endif
+-
+-foreach SYS ($argv)
+-    set SYSID=${SYS}_${ID}
+-    set SYSCONF=$OBJDIR/config.$SYSID
+-    set BLDDIR=$OBJDIR
+-    if ($?beverbose) then
+-        echo "[ generating $SYSID from $MASTER_DIR/MASTER{,.$cpu}{,.local} ]"
+-    endif
+-    echo +$SYS \
+-    | \
+-    cat $MASTER $MASTER_CPU - \
+-        $MASTER $MASTER_CPU \
+-    | \
+-    unifdef -t -DPLATFORM_${PLATFORM} -DCPU_$cpu -DSOC_CONFIG_${SOC_CONFIG} -DSYS_${SYS} $DEF_AVP $DEF_SEED - \
+-    | \
+-    sed -n \
+-	-e "/^+/{" \
+-	   -e "s;[-+];#&;gp" \
+-	      -e 't loop' \
+-	   -e ': loop' \
+-           -e 'n' \
+-	   -e '/^#/b loop' \
+-	   -e '/^$/b loop' \
+-	   -e 's;^\([^#]*\).*#[ 	]*<\(.*\)>[ 	]*$;\2#\1;' \
+-	      -e 't not' \
+-	   -e 's;\([^#]*\).*;#\1;' \
+-	      -e 't not' \
+-	   -e ': not' \
+-	   -e 's;[ 	]*$;;' \
+-	   -e 's;^\!\(.*\);\1#\!;' \
+-	   -e 'p' \
+-	      -e 't loop' \
+-           -e 'b loop' \
+-	-e '}' \
+-	-e "/^[^#]/d" \
+-	-e 's;	; ;g' \
+-	-e "s;^# *\([^ ]*\)[ ]*=[ ]*\[\(.*\)\].*;\1#\2;p" \
+-    | \
+-    awk '-F#' '\
+-part == 0 && $1 != "" {\
+-	m[$1]=m[$1] " " $2;\
+-	next;\
+-}\
+-part == 0 && $1 == "" {\
+-	for (i=NF;i>1;i--){\
+-		s=substr($i,2);\
+-		c[++na]=substr($i,1,1);\
+-		a[na]=s;\
+-	}\
+-	while (na > 0){\
+-		s=a[na];\
+-		d=c[na--];\
+-		if (m[s] == "") {\
+-			f[s]=d;\
+-		} else {\
+-			nx=split(m[s],x," ");\
+-			for (j=nx;j>0;j--) {\
+-				z=x[j];\
+-				a[++na]=z;\
+-				c[na]=d;\
+-			}\
+-		}\
+-	}\
+-	part=1;\
+-	next;\
+-}\
+-part != 0 {\
+-	if ($1 != "") {\
+-		n=split($1,x,",");\
+-		ok=0;\
+-		for (i=1;i<=n;i++) {\
+-			if (f[x[i]] == "+") {\
+-				ok=1;\
+-			}\
+-		}\
+-		if (NF > 2 && ok == 0 || NF <= 2 && ok != 0) {\
+-			print $2; \
+-		}\
+-	} else { \
+-		print $2; \
+-	}\
+-}\
+-' >$SYSCONF.new
+-    if (-z $SYSCONF.new) then
+-	echo "${prog}: ${$SYSID}: no such configuration in $MASTER_DIR/MASTER{,.$cpu}"
+-	rm -f $SYSCONF.new
+-    endif
+-#
+-# These paths are used by config.
+-#
+-# "builddir" is the name of the directory where kernel binaries
+-# are put.  It is a single path element, never absolute, and is
+-# always relative to "objectdir".  "builddir" is used by config
+-# solely to determine where to put files created by "config" (e.g.
+-# the created Makefile and *.h's.)
+-#
+-# "objectdir" is the name of the directory which will hold "builddir".
+-# It is a path; if relative, it is relative to the current directory
+-# where config is run.  It's sole use is to be prepended to "builddir"
+-# to indicate where config-created files are to be placed (see above).
+-#
+-# "sourcedir" is the location of the sources used to build the kernel.
+-# It is a path; if relative, it is relative to the directory specified
+-# by the concatenation of "objectdir" and "builddir" (i.e. where the
+-# kernel binaries are put).
+-#
+-    echo 'builddir	"."'			>> $SYSCONF.new
+-    echo 'objectdir	"'$OBJDIR'"'		>> $SYSCONF.new
+-    set SRCDIR=`dirname $SOURCE`
+-    echo 'sourcedir	"'$SRCROOT'"'		>> $SYSCONF.new
+-    if (-f $SYSCONF) then
+-	diff $SYSCONF $SYSCONF.new
+-	rm -f $SYSCONF.old
+-	mv $SYSCONF $SYSCONF.old
+-    endif
+-    rm -f $SYSCONF
+-    mv $SYSCONF.new $SYSCONF
+-    if ($?doconfig) then
+-        if ($?beverbose) then
+-	    echo "[ configuring $SYSID ]"
+-        endif
+-	if ($?profile) then
+-	    $CONFIG_DIR/config -c $SOURCEDIR -p $SYSCONF
+-	else
+-	    $CONFIG_DIR/config -c $SOURCEDIR $SYSCONF
+-	endif
+-    endif
+-end
++#!/usr/bin/env python3
++import sys, os, re, subprocess
++
++def doconf(argv):
++    prog = os.path.basename(argv[0])
++    objdir = "../BUILD"
++    sourcedir = "."
++    master_conf_dir = "."
++    def_seed = ""
++    def_avp = ""
++    doconfig = False
++    beverbose = False
++    machine = ""
++    profile = False
++    soc_config = ""
++    platform = ""
++    srcroot = os.environ.get("SRCROOT", ".")
++    objroot = os.environ.get("OBJROOT", objdir)
++    config_dir = os.path.join(objroot, "SETUP/config")
++
++    i = 1
++    sys_configs = []
++    while i < len(argv):
++        arg = argv[i]
++        if arg in ("-c", "-config"):
++            doconfig = True
++            i += 1
++        elif arg == "-cpu":
++            machine = argv[i+1]
++            i += 2
++        elif arg == "-soc":
++            soc_config = argv[i+1]
++            if soc_config.startswith("vm"):
++                def_avp = "-DSOC_IS_VIRTUALIZED"
++            else:
++                def_avp = "-USOC_IS_VIRTUALIZED"
++            i += 2
++        elif arg == "-platform":
++            platform = argv[i+1]
++            i += 2
++        elif arg == "-d":
++            objdir = argv[i+1]
++            i += 2
++        elif arg == "-m":
++            master_conf_dir = argv[i+1]
++            i += 2
++        elif arg == "-s":
++            sourcedir = argv[i+1]
++            i += 2
++        elif arg == "-verbose":
++            beverbose = True
++            i += 1
++        elif arg in ("-p", "-profile"):
++            profile = True
++            i += 1
++        elif arg.startswith("-"):
++            print(f"{prog}: {arg}: unknown switch", file=sys.stderr)
++            sys.exit(1)
++        else:
++            sys_configs.append(arg)
++            i += 1
++
++    if not sys_configs:
++        sys_configs = ["GENERIC"]
++
++    if not machine:
++        print(f"{prog}: MACHINE not set", file=sys.stderr)
++        sys.exit(1)
++
++    cpu = machine.lower()
++    ID = machine.upper()
++    master = os.path.join(master_conf_dir, "MASTER")
++    master_cpu = ""
++    candidates = [
++        f"{master}.{cpu}.{soc_config}.{platform}",
++        f"{master}.{cpu}.{soc_config}",
++        f"{master}.{cpu}.{platform}",
++        f"{master}.{cpu}",
++    ]
++    for c in candidates:
++        if os.path.isfile(c):
++            master_cpu = c
++            break
++
++    for sys_name in sys_configs:
++        sysid = f"{sys_name}_{ID}"
++        sysconf = os.path.join(objdir, f"config.{sysid}")
++        if beverbose:
++            print(f"[ generating {sysid} from {master_conf_dir}/MASTER{{,.{cpu}}}{{,.local}} ]")
++
++        with open(master) as f:
++            master_content = f.read()
++        master_cpu_content = ""
++        if master_cpu and os.path.isfile(master_cpu):
++            with open(master_cpu) as f:
++                master_cpu_content = f.read()
++
++        unifdef_cmd = [
++            "unifdef", "-t",
++            f"-DPLATFORM_{platform}",
++            f"-DCPU_{cpu}",
++            f"-DSOC_CONFIG_{soc_config}",
++            f"-DSYS_{sys_name}"
++        ]
++        if def_avp:
++            unifdef_cmd.append(def_avp)
++        if def_seed:
++            unifdef_cmd.append(def_seed)
++
++        p = subprocess.run(
++            unifdef_cmd,
++            input=f"{master_content}\n{master_cpu_content}",
++            stdout=subprocess.PIPE,
++            text=True
++        )
++        lines = p.stdout.splitlines()
++
++        mappings = {}
++        content_lines = []
++        for line in lines:
++            m = re.match(r'^\s*#?\s*([A-Za-z0-9_]+)\s*=\s*\[(.*?)\]', line)
++            if m:
++                mappings[m.group(1)] = m.group(2).split()
++            else:
++                content_lines.append(line)
++
++        active_tags = set()
++        stack = [sys_name]
++        while stack:
++            item = stack.pop()
++            if item in mappings:
++                for sub in mappings[item]:
++                    stack.append(sub)
++            else:
++                active_tags.add(item)
++
++        result_lines = []
++        for line in content_lines:
++            sline = line.strip()
++            if not sline or sline.startswith('#'):
++                continue
++            m = re.search(r'#\s*<([^>]+)>\s*$', line)
++            if m:
++                selector = m.group(1)
++                code_part = line[:m.start()].rstrip()
++                sel_items = [t.strip() for t in selector.split(',')]
++                ok = False
++                for t in sel_items:
++                    if t.startswith('!'):
++                        if t[1:] not in active_tags:
++                            ok = True
++                    else:
++                        if t in active_tags:
++                            ok = True
++                if ok:
++                    result_lines.append(code_part)
++            else:
++                result_lines.append(line)
++
++        result_lines.append('builddir\t"."')
++        result_lines.append(f'objectdir\t"{objdir}"')
++        result_lines.append(f'sourcedir\t"{srcroot}"')
++
++        os.makedirs(objdir, exist_ok=True)
++        with open(f"{sysconf}.new", "w") as f:
++            f.write("\n".join(result_lines) + "\n")
++
++        if os.path.isfile(sysconf):
++            if os.path.isfile(f"{sysconf}.old"):
++                os.unlink(f"{sysconf}.old")
++            os.rename(sysconf, f"{sysconf}.old")
++        os.rename(f"{sysconf}.new", sysconf)
++
++        if doconfig:
++            if beverbose:
++                print(f"[ configuring {sysid} ]")
++            config_bin = os.path.join(config_dir, "config")
++            cfg_cmd = [config_bin, "-c", sourcedir]
++            if profile:
++                cfg_cmd.append("-p")
++            cfg_cmd.append(sysconf)
++            subprocess.run(cfg_cmd, check=True)
++
++if __name__ == "__main__":
++    doconf(sys.argv)
+--- a/SETUP/decomment/decomment.c	2024-08-19 23:08:01.000000000 -0700
++++ b/SETUP/decomment/decomment.c	2026-09-05 02:02:04.269159897 -0700
+@@ -30,7 +30,7 @@
+ 
+ #include <stdio.h>
+ #include <ctype.h>      /* for isspace */
+-#include <libc.h>
++#include "../libc.h"
+ 
+ /*
+  * State of input scanner.
+--- a/SETUP/installfile/installfile.c	2024-08-19 23:08:01.000000000 -0700
++++ b/SETUP/installfile/installfile.c	2026-09-05 02:01:43.101035442 -0700
+@@ -34,7 +34,7 @@
+ #include <sys/param.h>
+ #include <sys/time.h>
+ 
+-#include <copyfile.h>
++#include "../compat.h"
+ 
+ void usage(void);
+ 
+--- a/SETUP/replacecontents/replacecontents.c	2024-08-19 23:08:01.000000000 -0700
++++ b/SETUP/replacecontents/replacecontents.c	2026-09-05 02:01:43.103914420 -0700
+@@ -28,6 +28,7 @@
+ #include <stdbool.h>
+ #include <errno.h>
+ #include <err.h>
++#include "../compat.h"
+ #include <sysexits.h>
+ 
+ #include <sys/stat.h>
+--- a/iokit/DriverKit/Makefile	2024-08-19 23:08:01.000000000 -0700
++++ b/iokit/DriverKit/Makefile	2026-09-05 02:58:12.157939617 -0700
+@@ -41,12 +41,12 @@
+ 
+ OTHER_HEADERS = IOTypes.h IOReturn.h IORPC.h IOKitKeys.h \
+ 				IOKernelReportStructs.h IOReportTypes.h \
+-				queue_implementation.h macro_help.h \
++				macro_help.h \
+ 				bounded_ptr.h bounded_array.h bounded_array_ref.h bounded_ptr_fwd.h \
+ 				OSBoundedArray.h OSBoundedArrayRef.h OSBoundedPtr.h OSBoundedPtrFwd.h \
+ 				safe_allocation.h
+ 
+-EXPORT_MI_GEN_LIST = $(GENERATED_HEADERS)  $(OTHER_HEADERS)
++EXPORT_MI_GEN_LIST = $(GENERATED_HEADERS)
+ INSTALL_MI_GEN_LIST = $(GENERATED_HEADERS)  $(OTHER_HEADERS)
+ INSTALL_MI_LCL_GEN_LIST = $(GENERATED_HEADERS)  $(OTHER_HEADERS)
+ INSTALL_DRIVERKIT_MI_GEN_LIST = $(PUBLIC_GENERATED_HEADERS) $(OTHER_HEADERS)
+--- a/libkern/libkern/Makefile	2024-08-19 23:08:01.000000000 -0700
++++ b/libkern/libkern/Makefile	2026-09-05 02:05:57.242195269 -0700
+@@ -119,7 +119,7 @@
+ 
+ version.h: version.h.template $(NEWVERS) $(XNU_VERSION)
+ 	@$(LOG_GENERATE) "libkern/$@$(Color0) from $(ColorF)$<"
+-	$(_v)install $(DATA_INSTALL_FLAGS) $< $@
++	$(_v)$(INSTALL) $(DATA_INSTALL_FLAGS) $< $@
+ 	$(_v)$(NEWVERS) $@ > /dev/null
+ 
+ include $(MakeInc_rule)
+--- a/makedefs/MakeInc.cmd	2024-08-19 23:08:01.000000000 -0700
++++ b/makedefs/MakeInc.cmd	2026-09-05 02:12:26.017675825 -0700
+@@ -102,12 +102,12 @@
+ 	_v =
+ 	_vstdout =
+ 	_vstderr =
+-	XCRUN = /usr/bin/xcrun -verbose
++	XCRUN = xcrun -verbose
+ else
+ 	_v = @
+ 	_vstdout = > /dev/null
+ 	_vstderr = 2> /dev/null
+-	XCRUN = /usr/bin/xcrun
++	XCRUN = xcrun
+ endif
+ 
+ VERBOSE_GENERATED_MAKE_FRAGMENTS = NO
+@@ -215,10 +215,10 @@
+ # CC/CXX get defined by make(1) by default, so we can't check them
+ # against the empty string to see if they haven't been set
+ ifeq ($(origin CC),default)
+-	export CC := $(shell $(XCRUN) -sdk $(SDKROOT) -find clang)
++	export CC := $(XCRUN) -sdk $(SDKROOT) clang
+ endif
+ ifeq ($(origin CXX),default)
+-	export CXX := $(shell $(XCRUN) -sdk $(SDKROOT) -find clang++)
++	export CXX := $(XCRUN) -sdk $(SDKROOT) clang++
+ endif
+ ifeq ($(origin MIG),undefined)
+ 	export MIG := $(shell $(XCRUN) -sdk $(SDKROOT) -find mig)
+@@ -356,7 +356,7 @@
+ 	export HOST_GM4		:= $(shell $(XCRUN) -sdk $(HOST_SDKROOT) -find gm4)
+ endif
+ ifeq ($(origin HOST_CODESIGN),undefined)
+-	export HOST_CODESIGN	:= /usr/bin/codesign
++	export HOST_CODESIGN	:= true
+ endif
+ ifeq ($(origin HOST_CODESIGN_ALLOCATE),undefined)
+ 	export HOST_CODESIGN_ALLOCATE	:= $(shell $(XCRUN) -sdk $(HOST_SDKROOT) -find codesign_allocate)
+--- a/makedefs/MakeInc.top	2024-08-19 23:08:01.000000000 -0700
++++ b/makedefs/MakeInc.top	2026-09-05 02:01:56.306609849 -0700
+@@ -285,7 +285,7 @@
+ # $(warning PRIMARY_KERNEL_CONFIGS is $(PRIMARY_KERNEL_CONFIGS))
+ # $(warning VARIANT_CONFIGS is $(VARIANT_CONFIGS))
+ 
+-MEMORY_SIZE := $(shell /usr/sbin/sysctl -n hw.memsize)
++MEMORY_SIZE := $(shell sysctl -n hw.memsize)
+ 
+ # Assume LTO scaling by default, unless it is being explicitly passed on the command-line
+ LARGE_BUILD_FOOTPRINT := $(if $(BUILD_LTO),$(BUILD_LTO),1)

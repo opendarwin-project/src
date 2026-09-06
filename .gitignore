@@ -1,0 +1,4 @@
+/sysroot
+/xnu
+/dev/xnu-meson-test
+*.bin

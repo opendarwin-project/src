@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+product="macOS"
+version="14.6"
+build="23G80"
+
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		-productName)
+			echo "$product"
+			exit 0
+			;;
+		-productVersion)
+			echo "$version"
+			exit 0
+			;;
+		-buildVersion)
+			echo "$build"
+			exit 0
+			;;
+		*)
+			shift
+			;;
+	esac
+done
+
+echo "ProductName:		$product"
+echo "ProductVersion:		$version"
+echo "BuildVersion:		$build"

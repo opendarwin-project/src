@@ -1,0 +1,7 @@
+sys-devel/xcode-toolchain-wrappers ~amd64
+sys-devel/bootstrap-cmds ~amd64
+sys-libs/libsystem ~arm64-macos ~x64-macos
+dev-util/unifdef ~amd64
+sys-kernel/xnu ~arm64-macos
+llvm-core/* **
+llvm-runtimes/* **

@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Darwin hw.* keys used by xnu makefiles. Anything else is passed to the
+# real Linux sysctl if present.
+if [[ "$1" == "-n" ]]; then
+	key="$2"
+else
+	key="$1"
+fi
+
+case "$key" in
+	hw.memsize)
+		echo "17179869184"
+		;;
+	hw.physicalcpu)
+		echo "${NPROC:-$(nproc 2>/dev/null || echo 8)}"
+		;;
+	hw.logicalcpu|hw.ncpu)
+		echo "${NPROC:-$(nproc 2>/dev/null || echo 8)}"
+		;;
+	*)
+		if command -v /usr/sbin/sysctl >/dev/null 2>&1; then
+			exec /usr/sbin/sysctl "$@"
+		fi
+		echo "sysctl: unknown key: ${key}" >&2
+		exit 1
+		;;
+esac

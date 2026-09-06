@@ -1,0 +1,235 @@
+--- a/lld/MachO/Config.h	2026-06-15 15:33:53.000000000 -0700
++++ b/lld/MachO/Config.h	2026-09-05 21:29:32.578303344 -0700
+@@ -89,6 +89,11 @@
+   uint32_t initProt;
+ };
+ 
++struct SegmentAddress {
++  llvm::StringRef name;
++  uint64_t addr;
++};
++
+ class SymbolPatterns {
+ public:
+   // GlobPattern can also match literals,
+@@ -215,6 +220,13 @@
+   // so use a vector instead of a map.
+   std::vector<SectionAlign> sectionAlignments;
+   std::vector<SegmentProtection> segmentProtections;
++  // Segment layout controls for fully static images, whose boot code
++  // assumes the link-time layout it requested (-image_base, -segaddr,
++  // -segalign, -segment_order).  The XNU kernel link uses all four.
++  uint64_t imageBase = 0;
++  uint64_t segmentAlign = 0;
++  std::vector<SegmentAddress> segmentAddresses;
++  std::vector<llvm::StringRef> segmentOrder;
+   bool ltoDebugPassManager = false;
+   bool emitLLVM = false;
+   llvm::StringRef codegenDataGeneratePath;
+--- a/lld/MachO/Driver.cpp	2026-06-15 15:33:53.000000000 -0700
++++ b/lld/MachO/Driver.cpp	2026-09-05 21:29:32.578758205 -0700
+@@ -964,6 +964,12 @@
+ static UndefinedSymbolTreatment
+ getUndefinedSymbolTreatment(const ArgList &args) {
+   StringRef treatmentStr = args.getLastArgValue(OPT_undefined);
++  // GNU ld compatibility: build systems (meson, with its default b_lundef
++  // setting) pass --no-undefined to require that all undefined symbols are
++  // resolved. Treat it as an alias for '-undefined error' unless the more
++  // permissive '-undefined dynamic_lookup' was explicitly requested.
++  if (args.hasArg(OPT_no_undefined) && treatmentStr != "dynamic_lookup")
++    return UndefinedSymbolTreatment::error;
+   auto treatment =
+       StringSwitch<UndefinedSymbolTreatment>(treatmentStr)
+           .Cases({"error", ""}, UndefinedSymbolTreatment::error)
+@@ -1035,6 +1041,19 @@
+ static void warnIfUnimplementedOption(const Option &opt) {
+   if (!opt.getGroup().isValid() || !opt.hasFlag(DriverFlag::HelpHidden))
+     return;
++  // Options that this linker does implement must not be reported as
++  // unimplemented just because they are hidden from -help.
++  switch (opt.getID()) {
++  case OPT_static:
++  case OPT_no_undefined:
++  case OPT_image_base:
++  case OPT_segaddr:
++  case OPT_segalign:
++  case OPT_segment_order:
++    return;
++  default:
++    break;
++  }
+   switch (opt.getGroup().getID()) {
+   case OPT_grp_deprecated:
+     // warn about deprecated options elsewhere
+@@ -1786,6 +1805,45 @@
+   if (errorCount())
+     return false;
+ 
++  // Segment layout options: -image_base gives the load address of the
++  // first segment, -segaddr pins individual ones, -segalign sets the
++  // granularity used between segments and -segment_order the layout
++  // sequence.  Consumed by Writer::finalizeAddresses() /
++  // Writer::sortSegmentsAndSections().  The addresses are parsed with
++  // StringRef::getAsInteger() because they can exceed INT64_MAX (the
++  // kernel runs from high canonical addresses), which args::getHex()
++  // cannot hold.
++  if (const Arg *arg = args.getLastArg(OPT_image_base)) {
++    llvm::StringRef value = arg->getValue();
++    if (value.getAsInteger(0, config->imageBase))
++      error("-image_base: invalid address '" + value + "'");
++  }
++  if (const Arg *arg = args.getLastArg(OPT_segalign)) {
++    llvm::StringRef value = arg->getValue();
++    if (value.getAsInteger(0, config->segmentAlign))
++      error("-segalign: invalid alignment '" + value + "'");
++  }
++  for (const Arg *arg : args.filtered(OPT_segaddr)) {
++    StringRef addrStr = arg->getValue(1);
++    uint64_t addr = 0;
++    if (addrStr.getAsInteger(0, addr)) {
++      error("-segaddr: invalid address '" + addrStr +
++            "' for segment " + arg->getValue(0));
++      continue;
++    }
++    config->segmentAddresses.push_back({arg->getValue(0), addr});
++  }
++  if (const Arg *arg = args.getLastArg(OPT_segment_order)) {
++    llvm::StringRef remaining = arg->getValue();
++    do {
++      size_t colon = remaining.find(':');
++      config->segmentOrder.push_back(remaining.substr(0, colon));
++      if (colon == StringRef::npos)
++        break;
++      remaining = remaining.substr(colon + 1);
++    } while (!remaining.empty());
++  }
++
+   if (args.hasArg(OPT_pagezero_size)) {
+     uint64_t pagezeroSize = args::getHex(args, OPT_pagezero_size, 0);
+ 
+--- a/lld/MachO/Options.td	2026-06-15 15:33:53.000000000 -0700
++++ b/lld/MachO/Options.td	2026-09-05 21:29:32.577266529 -0700
+@@ -655,6 +655,10 @@
+     MetaVarName<"<symbol>">,
+     HelpText<"Allow <symbol> to have no definition">,
+     Group<grp_resolve>;
++def no_undefined : Flag<["-", "--"], "no-undefined">,
++    HelpText<"Fail if the output contains undefined symbols (alias for '-undefined error', GNU ld compatibility)">,
++    Flags<[HelpHidden]>,
++    Group<grp_resolve>;
+ def undefined : Separate<["-"], "undefined">,
+     MetaVarName<"<treatment>">,
+     HelpText<"Handle undefined symbols according to <treatment>: error, warning, suppress, or dynamic_lookup (default is error)">,
+--- a/lld/MachO/SyntheticSections.cpp	2026-06-15 15:33:53.000000000 -0700
++++ b/lld/MachO/SyntheticSections.cpp	2026-09-05 21:29:32.578150073 -0700
+@@ -122,7 +122,9 @@
+   hdr->filetype = config->outputType;
+   hdr->ncmds = loadCommands.size();
+   hdr->sizeofcmds = sizeOfCmds;
+-  hdr->flags = MH_DYLDLINK;
++  // A -static binary is fully self-contained: do not mark it as
++  // dynamically linked.
++  hdr->flags = config->staticLink ? 0 : MH_DYLDLINK;
+ 
+   if (config->namespaceKind == NamespaceKind::twolevel)
+     hdr->flags |= MH_NOUNDEFS | MH_TWOLEVEL;
+--- a/lld/MachO/Writer.cpp	2026-06-15 15:33:53.000000000 -0700
++++ b/lld/MachO/Writer.cpp	2026-09-05 21:29:32.579222476 -0700
+@@ -841,7 +841,10 @@
+ 
+   switch (config->outputType) {
+   case MH_EXECUTE:
+-    in.header->addLoadCommand(make<LCLoadDylinker>());
++    // A -static binary is self-contained and has no dyld, so there must be
++    // no LC_LOAD_DYLINKER command either.
++    if (!config->staticLink)
++      in.header->addLoadCommand(make<LCLoadDylinker>());
+     break;
+   case MH_DYLIB:
+     in.header->addLoadCommand(make<LCDylib>(LC_ID_DYLIB, config->installName,
+@@ -938,6 +941,9 @@
+     }
+ 
+     ordinal = dylibFile->ordinal = dylibOrdinal++;
++    if (config->staticLink)
++      error(Twine("-static cannot be used with dylib '") +
++            dylibFile->getName() + "'");
+     LoadCommandType lcType = LC_LOAD_DYLIB;
+     if (dylibFile->reexport) {
+       if (dylibFile->forceWeakImport)
+@@ -978,6 +984,26 @@
+   TimeTraceScope timeScope("Sort segments and sections");
+   sortOutputSegments();
+ 
++  // -segment_order <seg:seg:...> requests an explicit layout sequence, as
++  // used by the XNU kernel link.  Segments missing from the list keep their
++  // relative order but follow the listed ones; __LINKEDIT always stays last
++  // because its contents are only known after every other segment is
++  // placed.
++  if (!config->segmentOrder.empty()) {
++    auto rank = [](const OutputSegment *seg) -> uint64_t {
++      if (seg->name == segment_names::linkEdit)
++        return std::numeric_limits<uint64_t>::max();
++      auto it = find(config->segmentOrder, seg->name);
++      if (it == config->segmentOrder.end())
++        return config->segmentOrder.size();
++      return it - config->segmentOrder.begin();
++    };
++    llvm::stable_sort(outputSegments, [&](const OutputSegment *a,
++                                          const OutputSegment *b) {
++      return rank(a) < rank(b);
++    });
++  }
++
+   DenseMap<const InputSection *, int> isecPriorities =
+       priorityBuilder.buildInputSectionPriorities();
+ 
+@@ -1122,9 +1148,23 @@
+   // Note that at this point, __LINKEDIT sections are empty, but we need to
+   // determine addresses of other segments/sections before generating its
+   // contents.
++  // -segalign overrides the page granularity used between segments, and
++  // -image_base gives the load address of the first segment laid out.
++  uint64_t segAlign = config->segmentAlign ? config->segmentAlign : pageSize;
++  if (config->imageBase)
++    addr = config->imageBase;
++
+   for (OutputSegment *seg : outputSegments) {
+     if (seg == linkEditSegment)
+       continue;
++    // -segaddr pins this segment's vmaddr. dyld requires ascending
++    // segment addresses, so a request below the address already reached is
++    // ignored.
++    auto fixed = find_if(config->segmentAddresses, [&](const SegmentAddress &a) {
++      return a.name == seg->name;
++    });
++    if (fixed != config->segmentAddresses.end())
++      addr = std::max(addr, fixed->addr);
+     seg->addr = addr;
+     assignAddresses(seg);
+     // codesign / libstuff checks for segment ordering by verifying that
+@@ -1132,8 +1172,8 @@
+     // alignToPowerOf2() before (instead of after) computing fileSize to ensure
+     // that the segments are contiguous. We handle addr / vmSize similarly for
+     // the same reason.
+-    fileOff = alignToPowerOf2(fileOff, pageSize);
+-    addr = alignToPowerOf2(addr, pageSize);
++    fileOff = alignToPowerOf2(fileOff, segAlign);
++    addr = alignToPowerOf2(addr, segAlign);
+     seg->vmSize = addr - seg->addr;
+     seg->fileSize = fileOff - seg->fileOff;
+     seg->assignAddressesToStartEndSymbols();
+@@ -1159,6 +1199,13 @@
+ 
+   // Now that __LINKEDIT is filled out, do a proper calculation of its
+   // addresses and offsets.
++  // __LINKEDIT is laid out after every other segment, so honor -segaddr
++  // __LINKEDIT here rather than in the main loop.
++  auto linkEditAddr = find_if(config->segmentAddresses, [&](const SegmentAddress &a) {
++    return a.name == segment_names::linkEdit;
++  });
++  if (linkEditAddr != config->segmentAddresses.end())
++    addr = std::max(addr, linkEditAddr->addr);
+   linkEditSegment->addr = addr;
+   assignAddresses(linkEditSegment);
+   // No need to page-align fileOff / addr here since this is the last segment.

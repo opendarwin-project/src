@@ -50,18 +50,12 @@ CARBONHEADERS_S="${WORKDIR}/CarbonHeaders-CarbonHeaders-${CARBONHEADERS_PV}"
 src_prepare() {
 	default
 
-	# libmalloc's private _malloc_type.h uses the unpublished internal
-	# __SPI_AVAILABLE spelling; alias it to the real published macro.
-	cd "${LIBMALLOC_S}" || die
-	eapply "${FILESDIR}/libmalloc-spi-availability-compat.patch"
-	cd "${WORKDIR}" || die
-
-	# xnu's DriverKit Makefile lists a handful of headers that live in
-	# other xnu subtrees (IOKit, libkern/c++, crypto); the make-based build
-	# expects a prior Xcode "Copy Headers" phase to stage them, which we
-	# replace with real symlinks to the same upstream files.
+	# xnu's build assumes a macOS host: absolute /usr/bin/xcrun, /usr/sbin/sysctl,
+	# macOS-only host-tool APIs, a csh doconf, and an Xcode "Copy Headers" phase
+	# that stages DriverKit's headers from sibling subtrees. Replace that staging
+	# step with symlinks to the same upstream files.
 	cd "${XNU_S}" || die
-	eapply "${FILESDIR}/xnu-10063.141.1-driverkit-headers.patch"
+	eapply "${FILESDIR}/xnu-10063.141.1-linux-build.patch"
 	ln -sf ../IOKit/IOTypes.h iokit/DriverKit/IOTypes.h || die
 	ln -sf ../IOKit/IOReturn.h iokit/DriverKit/IOReturn.h || die
 	ln -sf ../IOKit/IORPC.h iokit/DriverKit/IORPC.h || die
@@ -202,10 +196,15 @@ src_compile() {
 	EOF
 
 	# Compile actual Mach-O libSystem.B.dylib shared library
-	local clang_bin="clang"
+	local clang_bin
 	if command -v "${CTARGET}-clang" >/dev/null 2>&1; then
 		clang_bin="${CTARGET}-clang"
+	elif command -v xcrun >/dev/null 2>&1; then
+		clang_bin="$(xcrun -find clang)"
+	else
+		clang_bin="$(command -v clang || true)"
 	fi
+	[[ -n ${clang_bin} && -x ${clang_bin} ]] || die "clang not found (need xcrun or clang on PATH)"
 
 	"${clang_bin}" -target "${CTARGET:-arm64-apple-darwin}" \
 		-fno-stack-protector -ffreestanding -dynamiclib \
@@ -217,26 +216,24 @@ src_compile() {
 }
 
 src_install() {
-	local sysroot="/"
-	if is_crosspkg && target_is_not_host; then
-		sysroot="/usr/${CTARGET}"
-	fi
-
-	into "${sysroot}/usr"
-	insinto "${sysroot}/usr/lib"
+	# Plain /usr destinations: this package is merged with the per-target
+	# sysroot as ROOT (crossdev's model), so placement under
+	# /usr/${CTARGET} comes from ROOT, not from the install paths.
+	into /usr
+	insinto /usr/lib
 	doins "${T}/libSystem.B.tbd"
 	doins "${T}/libSystem.B.dylib"
 
-	dosym libSystem.B.dylib "${sysroot}/usr/lib/libSystem.dylib"
-	dosym libSystem.B.tbd "${sysroot}/usr/lib/libSystem.tbd"
-	dosym libSystem.B.dylib "${sysroot}/usr/lib/libc.dylib"
-	dosym libSystem.B.dylib "${sysroot}/usr/lib/libm.dylib"
-	dosym libSystem.B.dylib "${sysroot}/usr/lib/libpthread.dylib"
-	dosym libSystem.B.dylib "${sysroot}/usr/lib/libdl.dylib"
+	dosym libSystem.B.dylib /usr/lib/libSystem.dylib
+	dosym libSystem.B.tbd /usr/lib/libSystem.tbd
+	dosym libSystem.B.dylib /usr/lib/libc.dylib
+	dosym libSystem.B.dylib /usr/lib/libm.dylib
+	dosym libSystem.B.dylib /usr/lib/libpthread.dylib
+	dosym libSystem.B.dylib /usr/lib/libdl.dylib
 
 	# Assemble the open-source Darwin SDK headers directly from upstream
 	# apple-oss-distributions sources (never a bundled/proprietary SDK).
-	local hdr="${ED}/${sysroot}/usr/include"
+	local hdr="${ED}/usr/include"
 	_install() { # src... dest_subdir
 		local dest="$1"; shift
 		mkdir -p "${hdr}/${dest}" || die
@@ -253,8 +250,25 @@ src_install() {
 	# make_symbol_aliasing.sh looks for availability.pl (+ its data file) under
 	# ${SDKROOT}/usr/local/libexec, matching where it lives on a real Apple SDK.
 	mkdir -p "${xnu_dst}/usr/local/libexec" || die
-	cp "${AVAILABILITY_S}"/availability.pl "${AVAILABILITY_S}"/availability "${xnu_dst}/usr/local/libexec/" || die
+	# availability.pl is a Python driver; it needs the sibling "availability"
+	# module, availability.dsl, and templates/ next to it.
+	cp "${AVAILABILITY_S}"/availability.pl "${AVAILABILITY_S}"/availability \
+		"${AVAILABILITY_S}"/availability.dsl "${xnu_dst}/usr/local/libexec/" || die
+	cp -a "${AVAILABILITY_S}"/templates "${xnu_dst}/usr/local/libexec/" || die
 	chmod +x "${xnu_dst}/usr/local/libexec/availability.pl" || die
+
+	# Darwin sysctl shim + slotted clang live outside /usr/bin on this stage3.
+	# Export MIGCC/MIGCOM via the environment (not make command-line): GNU make
+	# does not export command-line vars, and MakeInc.cmd only `export`s MIGCC
+	# when origin is undefined.
+	local -x PATH="/usr/libexec/darwin:/usr/lib/llvm/${LLVM_SLOT:-22}/bin:/usr/libexec:${EPREFIX}/usr/bin:${EPREFIX}/usr/local/libexec:/usr/local/bin:${PATH}"
+	local -x MIGCC MIGCOM
+	MIGCC="$(command -v clang || true)"
+	[[ -n ${MIGCC} ]] || MIGCC="$(xcrun -find clang)" || die "clang not found"
+	MIGCOM="$(command -v migcom || true)"
+	[[ -n ${MIGCOM} ]] || MIGCOM="/usr/libexec/migcom"
+	[[ -x ${MIGCOM} ]] || die "migcom not found at ${MIGCOM}"
+	export MIGCC MIGCOM
 	emake -C "${XNU_S}" installhdrs \
 		SDKROOT="${xnu_dst}" \
 		TARGET_CONFIGS="RELEASE ARM64 VMAPPLE" \
@@ -262,20 +276,55 @@ src_install() {
 		RC_DARWIN_KERNEL_VERSION="${rc_darwin_kernel_version}" \
 		MEMORY_SIZE=17179869184 SYSCTL_HW_PHYSICALCPU=$(nproc) SYSCTL_HW_LOGICALCPU=$(nproc) \
 		KERNEL_BUILDS_IN_PARALLEL=1 \
-		MIGCC="$(xcrun -find clang)" HOST_CODESIGN=true HOST_CODESIGN_ALLOCATE=true \
+		HOST_CODESIGN=true HOST_CODESIGN_ALLOCATE=true \
 		OBJROOT="${XNU_S}/BUILD/obj" SYMROOT="${XNU_S}/BUILD/sym" DSTROOT="${xnu_dst}" \
 		|| die "xnu make installhdrs failed"
+	mkdir -p "${hdr}" || die
 	cp -r "${xnu_dst}"/usr/include/* "${hdr}/" || die
 	[[ -d ${xnu_dst}/usr/local/include ]] && cp -r "${xnu_dst}"/usr/local/include/* "${hdr}/" || die
 
+	# Userland libsyscall headers that xnu installhdrs does not stage:
+	# unistd.h includes <gethostuuid.h>, and <mach/mach.h> is the
+	# libsyscall umbrella (osfmk/mach/mach.h is the in-kernel copy).
+	cp "${XNU_S}"/libsyscall/wrappers/gethostuuid.h "${hdr}/" || die
 	cp "${XNU_S}"/libsyscall/wrappers/spawn/spawn.h "${hdr}/" || die
+	mkdir -p "${hdr}/libproc" || die
+	cp "${XNU_S}"/libsyscall/wrappers/libproc/libproc.h "${hdr}/libproc/" || die
+	cp "${XNU_S}"/libsyscall/mach/mach/*.h "${hdr}/mach/" || die
+
+	# User MIG headers (clock.h, mach_port.h, ...) are produced by
+	# libsyscall's mach_install_mig.sh, not by kernel installhdrs
+	# (osfmk/mach INSTALL_MI_GEN_LIST is empty upstream).
+	local mig_out="${WORKDIR}/libsyscall-mig"
+	local -x SRCROOT="${XNU_S}/libsyscall"
+	local -x OBJROOT="${WORKDIR}/libsyscall-obj"
+	local -x BUILT_PRODUCTS_DIR="${mig_out}"
+	local -x SDKROOT="${xnu_dst}"
+	local -x ARCHS="arm64"
+	local -x PLATFORM_NAME="macosx"
+	mkdir -p "${OBJROOT}" "${mig_out}" || die
+	bash "${XNU_S}/libsyscall/xcodescripts/mach_install_mig.sh" \
+		|| die "libsyscall mach_install_mig.sh failed"
+	cp -r "${mig_out}/mig_hdr/include/"* "${hdr}/" || die
 
 	[[ -d ${LIBPLATFORM_S}/include ]] && cp -r "${LIBPLATFORM_S}"/include/* "${hdr}/" || die
 	[[ -d ${LIBPTHREAD_S}/include ]] && cp -r "${LIBPTHREAD_S}"/include/* "${hdr}/" || die
+	# libpthread's install-symlinks.sh: historical names at usr/include/*.h
+	ln -sf pthread/pthread.h "${hdr}/pthread.h" || die
+	ln -sf pthread/pthread_impl.h "${hdr}/pthread_impl.h" || die
+	ln -sf pthread/pthread_spis.h "${hdr}/pthread_spis.h" || die
+	ln -sf pthread/sched.h "${hdr}/sched.h" || die
 	cp -r "${LIBC_S}"/include/* "${hdr}/" || die
-	# Libc's include/sys/cdefs.h is an #include_next wrapper expecting the
-	# real one from xnu bsd/sys/cdefs.h underneath; restore it after Libc.
-	cp "${XNU_S}"/bsd/sys/cdefs.h "${hdr}/sys/" || die
+	# Libc ships an #include_next sys/cdefs.h for its own build. The SDK
+	# header is the one installhdrs already unifdef'd into xnu_dst; copying
+	# the raw xnu source here would drop XNU_PLATFORM_MacOSX and leave
+	# write() aliased to write$UNIX2003 on arm64.
+	cp "${xnu_dst}"/usr/include/sys/cdefs.h "${hdr}/sys/" || die
+	# installhdrs leaves the XNU_PLATFORM_* lattice intact; a real
+	# MacOSX SDK unifdef's this. Do the same so arm64 userland sees
+	# __DARWIN_ONLY_UNIX_CONFORMANCE=1 (plain write(), not write$UNIX2003).
+	unifdef -m -t -DXNU_PLATFORM_MacOSX -UKERNEL "${hdr}/sys/cdefs.h"
+	[[ $? -le 1 ]] || die "unifdef sys/cdefs.h failed"
 
 	for subdir in gen stdlib stdio string sys; do
 		[[ -d ${LIBC_S}/${subdir} ]] && cp "${LIBC_S}/${subdir}"/*.h "${hdr}/" 2>/dev/null
@@ -293,8 +342,6 @@ src_install() {
 
 	_install bsm "${OPENBSM_S}"/openbsm/bsm/*.h
 
-	# Our own compat shim aliasing internal->public availability macros.
-	cp "${FILESDIR}/spi-availability-compat.h" "${hdr}/" || die
 
 	# Basic headers from upstream Libsystem source itself.
 	if [[ -f "${WORKDIR}/libsystem-Libsystem-${PV}/alloc_once_private.h" ]]; then

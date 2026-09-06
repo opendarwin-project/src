@@ -1,0 +1,189 @@
+diff --git a/include/ast.h b/include/ast.h
+index daf8588..dd97f7d 100644
+--- a/include/ast.h
++++ b/include/ast.h
+@@ -18,6 +18,7 @@
+ 
+ #include <cstdint>
+ #include <map>
++#include <set>
+ #include <string>
+ #include <vector>
+ 
+@@ -29,6 +30,7 @@ struct Param {
+   std::string defaultValue; /* without '=', empty if none */
+   bool isTarget = false;    /* TARGET annotation */
+   int arrayCount = 0;       /* "T * const foo[32]" -> 32; 0 = not an array */
++  std::string arraySizeExpr; /* array size when non-numeric ("const char foo[K_XY]") */
+   std::string portDisposition; /* MACH_MSG_TYPE_* for PORTMAKESEND/COPYSEND */
+ };
+ 
+@@ -93,6 +95,10 @@ struct File {
+   std::map<std::string, int> charArrayTypedefs;
+   std::map<std::string, ArrayTypedef> arrayTypedefs;
+   std::map<std::string, int> enumConstants;
++  /* top-level "struct NAME { ... };" plain-POD declarations seen in this
++   * file (e.g. DeviceParams, DeviceString): pointer params to these are
++   * marshaled by value (InStruct/OutStruct), not as OSObject refs. */
++  std::set<std::string> plainStructs;
+ };
+ 
+ bool parseIigFile(const std::string &path, const std::string &text, File &out,
+diff --git a/src/codegen.cpp b/src/codegen.cpp
+index ce64fda..5330b8e 100644
+--- a/src/codegen.cpp
++++ b/src/codegen.cpp
+@@ -100,6 +100,7 @@ enum class ParamDir {
+  * generation, one File processed at a time. */
+ const std::map<std::string, int> *g_charArrayTypedefs = nullptr;
+ const std::map<std::string, ArrayTypedef> *g_arrayTypedefs = nullptr;
++const std::set<std::string> *g_plainStructs = nullptr;
+ 
+ std::string
+ withoutConstPrefix(const std::string &t)
+@@ -137,7 +138,10 @@ isPlainStructType(const std::string &t)
+   static const std::set<std::string> structs = {
+     "IODMACommandSpecification",
+   };
+-  return structs.count(baseType(t)) != 0;
++  std::string base = baseType(t);
++  if (structs.count(base)) return true;
++  if (g_plainStructs && g_plainStructs->count(base)) return true;
++  return false;
+ }
+ 
+ ParamDir
+@@ -151,6 +155,12 @@ paramDir(const Param &p)
+     if (stars >= 2) return ParamDir::InObjectArray;
+     return isConst ? ParamDir::InInlineArray : ParamDir::OutInlineArray;
+   }
++  /* bounded strings written as "const char * name" (decayed from an array
++   * size like "const char name[N]") must be treated as string params, not
++   * as OSObject references. */
++  if (stars == 1 && baseType(p.type) == "char" && isConst) {
++    return ParamDir::InBoundedString;
++  }
+   if (stars == 0 && g_charArrayTypedefs) {
+     std::string base = withoutConstPrefix(p.type);
+     auto it = g_charArrayTypedefs->find(base);
+@@ -164,9 +174,13 @@ paramDir(const Param &p)
+   /* single star */
+   if (isScalarType(p.type) && !isConst) return ParamDir::OutScalar;
+   if (isPlainStructType(p.type) && isConst) return ParamDir::InStruct;
+-  /* plain structs (leading underscore convention, e.g. _IOMDPrivateState)
+-   * are copied out by value in the reply */
+-  if (!baseType(p.type).empty() && baseType(p.type)[0] == '_' && !isConst)
++  /* plain structs (leading underscore convention, e.g. _IOMDPrivateState,
++   * explicit "struct Foo" declarations, or a struct name declared in this
++   * .iig file) are copied out by value in the reply */
++  if (!isConst && (!baseType(p.type).empty() &&
++                   (baseType(p.type)[0] == '_' ||
++                    p.type.compare(0, 7, "struct ") == 0 ||
++                    isPlainStructType(p.type))))
+     return ParamDir::OutStruct;
+   return ParamDir::InObject; /* OSObject-derived by reference */
+ }
+@@ -178,7 +192,8 @@ boundedStringSize(const Param &p)
+   bool isConst = p.type.compare(0, 6, "const ") == 0;
+   std::string base = isConst ? p.type.substr(6) : p.type;
+   auto it = g_charArrayTypedefs->find(base);
+-  return it != g_charArrayTypedefs->end() ? it->second : 0;
++  if (it != g_charArrayTypedefs->end()) return it->second;
++  return 0;
+ }
+ 
+ struct MethodInfo {
+@@ -581,6 +596,7 @@ generateHeader(const File &f, std::string &o)
+ {
+   g_charArrayTypedefs = &f.charArrayTypedefs;
+   g_arrayTypedefs = &f.arrayTypedefs;
++  g_plainStructs = &f.plainStructs;
+   o += "/* iig-lite generated from " + f.basename + " - kernel-side subset;"
+        " msgids are NOT Apple-ABI */\n\n";
+   for (auto &ch : f.chunks) {
+@@ -634,11 +650,14 @@ emitMsgStructs(const MethodInfo &mi, std::string &o)
+   }
+   for (auto *p : mi.inBoundedStrings) {
+     int n = boundedStringSize(*p);
++    std::string sizeText = p->arraySizeExpr.empty()
++        ? std::to_string(n)
++        : p->arraySizeExpr;
+     o += "    const char *  " + p->name + ";\n"
+          "#if !defined(__LP64__)\n"
+          "    uint32_t __" + p->name + "Pad;\n"
+          "#endif /* !defined(__LP64__) */\n"
+-         "    char __" + p->name + "[" + std::to_string(n) + "];\n";
++         "    char __" + p->name + "[" + sizeText + "];\n";
+   }
+   o += "};\n#pragma pack(4)\nstruct " + mi.msg() + "\n{\n    IORPCMessageMach           mach;\n";
+   o += "    mach_msg_port_descriptor_t __object__descriptor;\n";
+@@ -1111,6 +1130,7 @@ generateImpl(const File &f, std::string &o)
+ {
+   g_charArrayTypedefs = &f.charArrayTypedefs;
+   g_arrayTypedefs = &f.arrayTypedefs;
++  g_plainStructs = &f.plainStructs;
+   std::string stem = f.basename;
+   size_t dot = stem.rfind('.');
+   if (dot != std::string::npos) stem = stem.substr(0, dot);
+diff --git a/src/parse.cpp b/src/parse.cpp
+index fb73cd4..72f57fb 100644
+--- a/src/parse.cpp
++++ b/src/parse.cpp
+@@ -179,9 +179,15 @@ parseParam(const std::string &raw, Param &p, std::string &error)
+   }
+   if (toks.empty()) { error = "empty parameter: " + raw; return false; }
+ 
+-  /* name = last identifier; watch for arrays "value[0]" (not expected) */
++  /* name = last identifier, but skip over any bracketed array-size
++   * expression (e.g. "const char reason[kSomeMacro]") so we don't mistake
++   * the size token for the parameter name. */
+   size_t nameIdx = toks.size();
++  int bracketDepth = 0;
+   for (size_t i = toks.size(); i-- > 0;) {
++    if (toks[i] == "]") { bracketDepth++; continue; }
++    if (toks[i] == "[") { bracketDepth--; continue; }
++    if (bracketDepth > 0) continue;
+     if (isIdentChar(toks[i][0]) && !isdigit((unsigned char)toks[i][0])) {
+       nameIdx = i;
+       break;
+@@ -195,9 +201,12 @@ parseParam(const std::string &raw, Param &p, std::string &error)
+   for (size_t i = nameIdx + 1; i < toks.size();) {
+     if (toks[i] == "[") {
+       isArray = true;
++      std::string sizeTok;
+       toks.erase(toks.begin() + i); /* '[' */
+       if (i < toks.size() && toks[i] != "]") {
++        sizeTok = toks[i];
+         p.arrayCount = atoi(toks[i].c_str());
++        if (p.arrayCount == 0 && !sizeTok.empty()) p.arraySizeExpr = sizeTok;
+         toks.erase(toks.begin() + i);
+       }
+       if (i < toks.size() && toks[i] == "]") toks.erase(toks.begin() + i);
+@@ -345,6 +354,27 @@ parseIigFile(const std::string &path, const std::string &text, File &out,
+     }
+   }
+ 
++  /* top-level "struct NAME {" plain-POD declarations: pointer params whose
++   * base type is one of these are marshaled by value, not as OSObject refs. */
++  {
++    std::string clean0 = blankComments(text);
++    size_t p = 0;
++    while ((p = clean0.find("struct", p)) != std::string::npos) {
++      size_t after = p + 6;
++      while (after < clean0.size() && isspace((unsigned char)clean0[after]))
++        after++;
++      size_t e = after;
++      while (e < clean0.size() && isIdentChar(clean0[e])) e++;
++      if (e > after) {
++        size_t b = e;
++        while (b < clean0.size() && isspace((unsigned char)clean0[b])) b++;
++        if (b < clean0.size() && clean0[b] == '{')
++          out.plainStructs.insert(clean0.substr(after, e - after));
++      }
++      p = after;
++    }
++  }
++
+   /* pull out "@iig implementation" ... "@iig end" regions: their content is
+    * impl-only (extra includes); blank them in the header text (newlines kept
+    * so line numbers stay stable) */
