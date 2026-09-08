@@ -712,3 +712,15 @@
  
  # Assume LTO scaling by default, unless it is being explicitly passed on the command-line
  LARGE_BUILD_FOOTPRINT := $(if $(BUILD_LTO),$(BUILD_LTO),1)
+--- a/SETUP/Makefile
++++ b/SETUP/Makefile
+@@ -10,2 +10,0 @@
+-	kextsymboltool	\
+-	setsegname	\
+--- a/libsyscall/xcodescripts/mach_install_mig.sh
++++ b/libsyscall/xcodescripts/mach_install_mig.sh
+@@ -33,2 +33,2 @@
+-MIG=`xcrun -sdk "$SDKROOT" -find mig`
+-MIGCC=`xcrun -sdk "$SDKROOT" -find cc`
++MIG="${MIG:-$(command -v mig || xcrun -find mig)}"
++MIGCC="${MIGCC:-$(command -v clang || xcrun -find clang)}"

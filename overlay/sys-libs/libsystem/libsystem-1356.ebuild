@@ -15,6 +15,31 @@ LIBMALLOC_PV="521.120.7"
 AVAILABILITY_PV="157.2"
 OPENBSM_PV="21"
 CARBONHEADERS_PV="18.1"
+# Real Libsystem.xcodeproj is link-only glue: its own `requiredlibs` names
+# ~15 dylibs it links against, each from a *separate* apple-oss-distributions
+# repo. These five are open-source and fetchable:
+DISPATCH_PV="1542.100.32"
+DYLD_PV="1378"
+UNWIND_PV="201"
+REMOVEFILE_PV="85.100.6"
+COPYFILE_PV="240"
+NOTIFY_PV="348.120.4"
+COMMONCRYPTO_PV="600035"
+CCTOOLS_PV="1035.1.102"
+CONFIGD_PV="1405.120.5"
+# NOT fetchable / not wired in yet, tracked here rather than silently
+# missing from the requiredlibs closure:
+#   - xpc: libxpc has never been open-sourced by Apple - no public repo
+#     exists at all. A from-source `system_notify`/xpc component is
+#     impossible; Libsystem's real xpc symbols must stay stubbed.
+#   - corecrypto: apple/corecrypto (different org - not apple-oss-
+#     distributions) has no version tags and ships under a custom
+#     "Other"/NOASSERTION license, not APSL-2 like the rest of this
+#     ebuild's sources - needs an explicit LICENSE/license-review decision
+#     before vendoring, not a same-pattern SRC_URI add.
+#   - compiler_rt: this requiredlibs entry means LLVM's compiler-rt
+#     builtins, not an apple-oss-distributions checkout - satisfied by the
+#     host LLVM toolchain's own runtime build, not a source fetch here.
 
 SRC_URI="
 	https://github.com/apple-oss-distributions/libsystem/archive/refs/tags/Libsystem-${PV}.tar.gz -> ${P}.tar.gz
@@ -26,6 +51,15 @@ SRC_URI="
 	https://github.com/apple-oss-distributions/AvailabilityVersions/archive/refs/tags/AvailabilityVersions-${AVAILABILITY_PV}.tar.gz -> AvailabilityVersions-${AVAILABILITY_PV}.tar.gz
 	https://github.com/apple-oss-distributions/OpenBSM/archive/refs/tags/OpenBSM-${OPENBSM_PV}.tar.gz -> OpenBSM-${OPENBSM_PV}.tar.gz
 	https://github.com/apple-oss-distributions/CarbonHeaders/archive/refs/tags/CarbonHeaders-${CARBONHEADERS_PV}.tar.gz -> CarbonHeaders-${CARBONHEADERS_PV}.tar.gz
+	https://github.com/apple-oss-distributions/libdispatch/archive/refs/tags/libdispatch-${DISPATCH_PV}.tar.gz -> libdispatch-${DISPATCH_PV}.tar.gz
+	https://github.com/apple-oss-distributions/dyld/archive/refs/tags/dyld-${DYLD_PV}.tar.gz -> dyld-${DYLD_PV}.tar.gz
+	https://github.com/apple-oss-distributions/libunwind/archive/refs/tags/libunwind-${UNWIND_PV}.tar.gz -> libunwind-${UNWIND_PV}.tar.gz
+	https://github.com/apple-oss-distributions/removefile/archive/refs/tags/removefile-${REMOVEFILE_PV}.tar.gz -> removefile-${REMOVEFILE_PV}.tar.gz
+	https://github.com/apple-oss-distributions/copyfile/archive/refs/tags/copyfile-${COPYFILE_PV}.tar.gz -> copyfile-${COPYFILE_PV}.tar.gz
+	https://github.com/apple-oss-distributions/Libnotify/archive/refs/tags/Libnotify-${NOTIFY_PV}.tar.gz -> Libnotify-${NOTIFY_PV}.tar.gz
+	https://github.com/apple-oss-distributions/CommonCrypto/archive/refs/tags/CommonCrypto-${COMMONCRYPTO_PV}.tar.gz -> CommonCrypto-${COMMONCRYPTO_PV}.tar.gz
+	https://github.com/apple-oss-distributions/cctools/archive/refs/tags/cctools-${CCTOOLS_PV}.tar.gz -> cctools-${CCTOOLS_PV}.tar.gz
+	https://github.com/apple-oss-distributions/configd/archive/refs/tags/configd-${CONFIGD_PV}.tar.gz -> configd-${CONFIGD_PV}.tar.gz
 "
 S="${WORKDIR}"
 
@@ -36,6 +70,14 @@ KEYWORDS="~arm64-macos ~x64-macos"
 BDEPEND="
 	dev-build/cmake
 	dev-build/ninja
+	dev-lang/python:*
+	dev-util/unifdef
+	sys-devel/bison
+	sys-devel/flex
+	sys-devel/bootstrap-cmds
+	sys-devel/iig-tools
+	sys-devel/xcode-toolchain-wrappers
+	sys-devel/xcbuild
 "
 
 XNU_S="${WORKDIR}/xnu-xnu-${XNU_PV}"
@@ -46,6 +88,15 @@ LIBMALLOC_S="${WORKDIR}/libmalloc-libmalloc-${LIBMALLOC_PV}"
 AVAILABILITY_S="${WORKDIR}/AvailabilityVersions-AvailabilityVersions-${AVAILABILITY_PV}"
 OPENBSM_S="${WORKDIR}/OpenBSM-OpenBSM-${OPENBSM_PV}"
 CARBONHEADERS_S="${WORKDIR}/CarbonHeaders-CarbonHeaders-${CARBONHEADERS_PV}"
+DISPATCH_S="${WORKDIR}/libdispatch-libdispatch-${DISPATCH_PV}"
+DYLD_S="${WORKDIR}/dyld-dyld-${DYLD_PV}"
+UNWIND_S="${WORKDIR}/libunwind-libunwind-${UNWIND_PV}"
+REMOVEFILE_S="${WORKDIR}/removefile-removefile-${REMOVEFILE_PV}"
+COPYFILE_S="${WORKDIR}/copyfile-copyfile-${COPYFILE_PV}"
+NOTIFY_S="${WORKDIR}/Libnotify-Libnotify-${NOTIFY_PV}"
+COMMONCRYPTO_S="${WORKDIR}/CommonCrypto-CommonCrypto-${COMMONCRYPTO_PV}"
+CCTOOLS_S="${WORKDIR}/cctools-cctools-${CCTOOLS_PV}"
+CONFIGD_S="${WORKDIR}/configd-configd-${CONFIGD_PV}"
 
 src_prepare() {
 	default
@@ -97,18 +148,57 @@ src_prepare() {
 		-e 's/@CONFIG_IPHONE@/0/' \
 		-e 's/@CONFIG_IPHONE_SIMULATOR@/0/' \
 		"${CARBONHEADERS_S}/TargetConditionals.h" || die
+
+	cat <<-EOF >> "${CARBONHEADERS_S}/TargetConditionals.h"
+	#ifndef TARGET_OS_OSX
+	#define TARGET_OS_OSX 1
+	#endif
+	#ifndef TARGET_OS_IOS
+	#define TARGET_OS_IOS 0
+	#endif
+	#ifndef TARGET_OS_TV
+	#define TARGET_OS_TV 0
+	#endif
+	#ifndef TARGET_OS_WATCH
+	#define TARGET_OS_WATCH 0
+	#endif
+	#ifndef TARGET_OS_BRIDGE
+	#define TARGET_OS_BRIDGE 0
+	#endif
+	#ifndef TARGET_OS_MACCATALYST
+	#define TARGET_OS_MACCATALYST 0
+	#endif
+	#ifndef TARGET_OS_SIMULATOR
+	#define TARGET_OS_SIMULATOR 0
+	#endif
+	#ifndef TARGET_OS_DRIVERKIT
+	#define TARGET_OS_DRIVERKIT 0
+	#endif
+	#ifndef TARGET_OS_EXCLAVECORE
+	#define TARGET_OS_EXCLAVECORE 0
+	#endif
+	#ifndef TARGET_OS_EXCLAVEKIT
+	#define TARGET_OS_EXCLAVEKIT 0
+	#endif
+	#ifndef TARGET_OS_VISION
+	#define TARGET_OS_VISION 0
+	#endif
+	EOF
 }
 
 src_compile() {
 	# Public Availability*.h / os_availability.h are code-generated, not
 	# hand-written, from the real AvailabilityVersions build tooling.
 	cd "${AVAILABILITY_S}" || die
-	emake \
-		SRCROOT="${AVAILABILITY_S}" \
-		OBJROOT="${AVAILABILITY_S}/obj" \
-		SYMROOT="${AVAILABILITY_S}/sym" \
-		DSTROOT="${AVAILABILITY_S}/dst" \
-		cmake
+	cmake -S "${AVAILABILITY_S}" -B "${AVAILABILITY_S}/obj" \
+		-DSRCROOT="${AVAILABILITY_S}" \
+		-DOBJROOT="${AVAILABILITY_S}/obj" \
+		-DSYMROOT="${AVAILABILITY_S}/sym" \
+		-DCMAKE_INSTALL_PREFIX="${AVAILABILITY_S}/dst/usr" \
+		-DDSTROOT="${AVAILABILITY_S}/dst" \
+		-DDRIVERKIT=0 -DSYSTEM_PREFIX="" -DCONFIG_EXCLAVEKIT=0 \
+		-DCONFIG_EXCLAVECORE=0 -DCONFIG_KERNELKIT=0 \
+		-DINSTALL_KERNEL_HEADERS="1" -DAV_VERSION="157.2" || die "AvailabilityVersions cmake configure failed"
 	cmake --build "${AVAILABILITY_S}/obj" || die "AvailabilityVersions build failed"
 	cmake --install "${AVAILABILITY_S}/obj" || die "AvailabilityVersions install failed"
 	cd "${WORKDIR}" || die
@@ -270,19 +360,41 @@ src_install() {
 	[[ -x ${MIGCOM} ]] || die "migcom not found at ${MIGCOM}"
 	export MIGCC MIGCOM
 	emake -C "${XNU_S}" installhdrs \
-		SDKROOT="${xnu_dst}" \
+		PLATFORM="MacOSX" \
+		SDKROOT="macosx14.0" \
+		HOST_SDKROOT_RESOLVED="/" \
+		HOST_CC="$(tc-getBUILD_CC)" \
+		HOST_CODESIGN="true" \
+		HOST_BISON="bison" \
+		HOST_FLEX="flex" \
+		HOST_GM4="m4" \
 		TARGET_CONFIGS="RELEASE ARM64 VMAPPLE" \
 		BUILD_WERROR=0 \
 		RC_DARWIN_KERNEL_VERSION="${rc_darwin_kernel_version}" \
-		MEMORY_SIZE=17179869184 SYSCTL_HW_PHYSICALCPU=$(nproc) SYSCTL_HW_LOGICALCPU=$(nproc) \
+		MEMORY_SIZE=17179869184 SYSCTL_HW_PHYSICALCPU=1 SYSCTL_HW_LOGICALCPU=1 \
 		KERNEL_BUILDS_IN_PARALLEL=1 \
-		HOST_CODESIGN=true HOST_CODESIGN_ALLOCATE=true \
+		HOST_CODESIGN_ALLOCATE=true \
 		OBJROOT="${XNU_S}/BUILD/obj" SYMROOT="${XNU_S}/BUILD/sym" DSTROOT="${xnu_dst}" \
 		|| die "xnu make installhdrs failed"
 	mkdir -p "${hdr}" || die
-	cp -r "${xnu_dst}"/usr/include/* "${hdr}/" || die
-	[[ -d ${xnu_dst}/usr/local/include ]] && cp -r "${xnu_dst}"/usr/local/include/* "${hdr}/" || die
+	cp -rf "${xnu_dst}"/usr/include/* "${hdr}/" || die
+	[[ -d ${xnu_dst}/usr/local/include ]] && cp -rf "${xnu_dst}"/usr/local/include/* "${hdr}/" || die
 
+	# Stage macOS Frameworks
+	if [[ -d "${xnu_dst}/System/Library/Frameworks" ]]; then
+		mkdir -p "${ED}/System/Library/Frameworks" || die
+		cp -rf "${xnu_dst}/System/Library/Frameworks"/* "${ED}/System/Library/Frameworks/" || die
+		local fw ver
+		for fw in "${ED}"/System/Library/Frameworks/*.framework; do
+			[[ -d "${fw}" ]] || continue
+			ver="A"
+			[[ -d "${fw}/Versions/B" ]] && ver="B"
+			[[ -d "${fw}/Versions/Current" ]] || ln -sf "${ver}" "${fw}/Versions/Current"
+			[[ -d "${fw}/PrivateHeaders" ]] || [[ -d "${fw}/Versions/${ver}/PrivateHeaders" ]] && ln -sf "Versions/${ver}/PrivateHeaders" "${fw}/PrivateHeaders"
+			[[ -d "${fw}/Headers" ]] || [[ -d "${fw}/Versions/${ver}/Headers" ]] && ln -sf "Versions/${ver}/Headers" "${fw}/Headers"
+			[[ -d "${fw}/Headers" ]] || [[ -d "${fw}/Versions/${ver}/PrivateHeaders" ]] && ln -sf "Versions/${ver}/PrivateHeaders" "${fw}/Headers"
+		done
+	fi
 	# Userland libsyscall headers that xnu installhdrs does not stage:
 	# unistd.h includes <gethostuuid.h>, and <mach/mach.h> is the
 	# libsyscall umbrella (osfmk/mach/mach.h is the in-kernel copy).
@@ -299,22 +411,31 @@ src_install() {
 	local -x SRCROOT="${XNU_S}/libsyscall"
 	local -x OBJROOT="${WORKDIR}/libsyscall-obj"
 	local -x BUILT_PRODUCTS_DIR="${mig_out}"
-	local -x SDKROOT="${xnu_dst}"
+	local -x SDKROOT="macosx14.0"
 	local -x ARCHS="arm64"
 	local -x PLATFORM_NAME="macosx"
 	mkdir -p "${OBJROOT}" "${mig_out}" || die
 	bash "${XNU_S}/libsyscall/xcodescripts/mach_install_mig.sh" \
 		|| die "libsyscall mach_install_mig.sh failed"
-	cp -r "${mig_out}/mig_hdr/include/"* "${hdr}/" || die
+	cp -rf "${mig_out}/mig_hdr/include/"* "${hdr}/" || die
 
-	[[ -d ${LIBPLATFORM_S}/include ]] && cp -r "${LIBPLATFORM_S}"/include/* "${hdr}/" || die
-	[[ -d ${LIBPTHREAD_S}/include ]] && cp -r "${LIBPTHREAD_S}"/include/* "${hdr}/" || die
+	# libplatform public and private headers
+	[[ -d ${LIBPLATFORM_S}/include ]] && cp -rf "${LIBPLATFORM_S}"/include/* "${hdr}/" || die
+	[[ -d ${LIBPLATFORM_S}/private ]] && cp -rf "${LIBPLATFORM_S}"/private/* "${hdr}/" || die
+
+	# libpthread public and private headers
+	[[ -d ${LIBPTHREAD_S}/include ]] && cp -rf "${LIBPTHREAD_S}"/include/* "${hdr}/" || die
+	[[ -d ${LIBPTHREAD_S}/private ]] && cp -rf "${LIBPTHREAD_S}"/private/* "${hdr}/" || die
 	# libpthread's install-symlinks.sh: historical names at usr/include/*.h
 	ln -sf pthread/pthread.h "${hdr}/pthread.h" || die
 	ln -sf pthread/pthread_impl.h "${hdr}/pthread_impl.h" || die
 	ln -sf pthread/pthread_spis.h "${hdr}/pthread_spis.h" || die
 	ln -sf pthread/sched.h "${hdr}/sched.h" || die
-	cp -r "${LIBC_S}"/include/* "${hdr}/" || die
+	cp -rf "${LIBC_S}"/include/* "${hdr}/" || die
+	# Restore libpthread's real qos.h which Libc's wrapper includes via include_next
+	[[ -f ${LIBPTHREAD_S}/include/pthread/qos.h ]] && cp -f "${LIBPTHREAD_S}/include/pthread/qos.h" "${hdr}/pthread/qos.h"
+	[[ -f ${LIBC_S}/include/NetBSD/utmpx.h ]] && cp -f "${LIBC_S}/include/NetBSD/utmpx.h" "${hdr}/"
+	[[ -f ${LIBC_S}/include/FreeBSD/nl_types.h ]] && cp -f "${LIBC_S}/include/FreeBSD/nl_types.h" "${hdr}/"
 	# Libc ships an #include_next sys/cdefs.h for its own build. The SDK
 	# header is the one installhdrs already unifdef'd into xnu_dst; copying
 	# the raw xnu source here would drop XNU_PLATFORM_MacOSX and leave
@@ -332,16 +453,43 @@ src_install() {
 	cp "${LIBC_S}/locale/xlocale_private.h" "${hdr}/" || die
 
 	# libmalloc public + private (patched) headers.
-	cp -r "${LIBMALLOC_S}"/include/malloc "${hdr}/" || die
+	# libmalloc public + private headers
+	cp -rf "${LIBMALLOC_S}"/include/malloc "${hdr}/" || die
+	[[ -d ${LIBMALLOC_S}/private ]] && cp -rf "${LIBMALLOC_S}"/private/* "${hdr}/" || die
+
+	# cctools mach-o headers (getsect.h, dyld.h, etc)
+	if [[ -d "${CCTOOLS_S}/include/mach-o" ]]; then
+		mkdir -p "${hdr}/mach-o" || die
+		cp -rf "${CCTOOLS_S}/include/mach-o"/* "${hdr}/mach-o/" || die
+	fi
+
+	# dyld headers (dlfcn.h, mach-o/dyld.h, etc)
+	if [[ -d "${DYLD_S}/include" ]]; then
+		cp -rf "${DYLD_S}/include"/* "${hdr}/" || die
+	fi
+
+	# libdispatch headers (dispatch/*.h, os/*.h)
+	if [[ -d "${DISPATCH_S}" ]]; then
+		mkdir -p "${hdr}/dispatch" "${hdr}/os" || die
+		[[ -d "${DISPATCH_S}/dispatch" ]] && cp -rf "${DISPATCH_S}/dispatch"/*.h "${hdr}/dispatch/" || die
+		[[ -d "${DISPATCH_S}/os" ]] && cp -rf "${DISPATCH_S}/os"/*.h "${hdr}/os/" || die
+	fi
+
+	# xnu EXTERNAL_HEADERS (architecture/byte_order.h, AssertMacros.h, etc)
+	if [[ -d "${XNU_S}/EXTERNAL_HEADERS" ]]; then
+		[[ -d "${XNU_S}/EXTERNAL_HEADERS/architecture" ]] && cp -rf "${XNU_S}/EXTERNAL_HEADERS/architecture" "${hdr}/" || die
+		for h in AssertMacros.h ptrauth.h ptrcheck.h; do
+			[[ -f "${XNU_S}/EXTERNAL_HEADERS/${h}" ]] && cp -f "${XNU_S}/EXTERNAL_HEADERS/${h}" "${hdr}/" || true
+		done
+	fi
 
 	# CarbonHeaders compatibility macros (TargetConditionals, MacTypes, etc).
-	cp "${CARBONHEADERS_S}"/*.h "${hdr}/" || die
+	cp -f "${CARBONHEADERS_S}"/*.h "${hdr}/" || die
 	# Generated public Availability.h/AvailabilityInternal.h supersede
 	# CarbonHeaders' committed copies.
-	cp -r "${AVAILABILITY_S}"/dst/usr/include/* "${hdr}/" || die
+	cp -rf "${AVAILABILITY_S}"/dst/usr/include/* "${hdr}/" || die
 
 	_install bsm "${OPENBSM_S}"/openbsm/bsm/*.h
-
 
 	# Basic headers from upstream Libsystem source itself.
 	if [[ -f "${WORKDIR}/libsystem-Libsystem-${PV}/alloc_once_private.h" ]]; then

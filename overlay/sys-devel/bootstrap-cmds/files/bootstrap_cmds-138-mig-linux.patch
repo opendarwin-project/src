@@ -4,17 +4,20 @@
  fi
  
  if [ -z "${MIGCC}" ]; then
--  xcrunPath="/usr/bin/xcrun"
-+  xcrunPath="$(command -v xcrun)"
+  xcrunPath="$(command -v xcrun)"
    if [ -x "${xcrunPath}" ]; then
-     MIGCC=`"${xcrunPath}" -sdk "$sdkRoot" -find cc`
+    if [ -n "$sdkRoot" ]; then
+      MIGCC=`"${xcrunPath}" -sdk "$sdkRoot" -find clang`
+    else
+      MIGCC=`"${xcrunPath}" -find clang`
+    fi
    else
      MIGCC=$(realpath "${scriptRoot}/cc")
    fi
  fi
-+if [ -z "${MIGCC}" ]; then
-+  MIGCC=$(command -v clang || command -v cc || true)
-+fi
+if [ -z "${MIGCC}" ]; then
+  MIGCC=$(command -v clang || command -v cc || true)
+fi
  
  C=${MIGCC}
 -M=${MIGCOM-${migcomPath}}

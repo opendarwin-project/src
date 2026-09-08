@@ -79,7 +79,7 @@ src_compile() {
 	[[ -n ${MIGCOM} ]] || MIGCOM="/usr/libexec/migcom"
 	export MIGCC MIGCOM
 
-	local darwin_sysroot="/usr/arm64-apple-darwin"
+	local darwin_sysroot="/usr/${CTARGET:-arm64-apple-darwin}"
 	[[ -d ${darwin_sysroot}/usr/include ]] || die "Darwin sysroot headers missing at ${darwin_sysroot}/usr/include; merge sys-libs/libsystem first"
 
 	local sdk="${WORKDIR}/sdk"
