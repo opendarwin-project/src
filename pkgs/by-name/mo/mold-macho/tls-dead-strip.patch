@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: OpenDarwin contributors <contributors@opendarwin.org>
+Date: Sun, 13 Sep 2026 19:30:00 -0700
+Subject: [PATCH] fix Rust TLS and literal-pool links
+
+Apple ld64 does not retain every S_THREAD_LOCAL_VARIABLES section as a
+-dead_strip root. Retaining unreferenced TLS changes the TLS image layout
+(and can corrupt TLS state in large Rust binaries). Live TLS sections remain
+reachable through relocations.
+
+mold's S_16BYTE_LITERALS coalescing can redirect an ARM64 Rust private literal
+symbol to a distinct atom. Do not coalesce that optional literal class; keeping
+duplicate 16-byte constants is safe and preserves their addresses.
+
+---
+ src/dead_strip.rs | 2 +-
+ src/passes.rs     | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/dead_strip.rs b/src/dead_strip.rs
+index 2162824..2e25f5e 100644
+--- a/src/dead_strip.rs
++++ b/src/dead_strip.rs
+@@ -60,7 +60,7 @@ pub fn dead_strip<E: Arch>(ctx: &mut Context<E>) {
+                 }
+                 let keep_type = matches!(
+                     ctx.hdr_of(isec).section_type(),
+-                    S_MOD_INIT_FUNC_POINTERS | S_INIT_FUNC_OFFSETS | S_THREAD_LOCAL_VARIABLES
++                    S_MOD_INIT_FUNC_POINTERS | S_INIT_FUNC_OFFSETS
+                 );
+                 let keep_attr =
+                     ctx.hdr_of(isec).flags & (S_ATTR_NO_DEAD_STRIP | S_ATTR_LIVE_SUPPORT) != 0;
+diff --git a/src/passes.rs b/src/passes.rs
+index 5eadb3a..48e0e5f 100644
+--- a/src/passes.rs
++++ b/src/passes.rs
+@@ -1229,7 +1229,7 @@ pub fn merge_literals<E: Arch>(ctx: &mut Context<E>) {
+             let ty = ctx.hdr_of(isec).section_type();
+             if !matches!(
+                 ty,
+-                S_CSTRING_LITERALS | S_4BYTE_LITERALS | S_8BYTE_LITERALS | S_16BYTE_LITERALS
++                S_CSTRING_LITERALS | S_4BYTE_LITERALS | S_8BYTE_LITERALS
+             ) {
+                 return None;
+             }
+-- 
+2.39.0

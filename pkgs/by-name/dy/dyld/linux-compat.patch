@@ -1,0 +1,82 @@
+--- a/build-scripts/prebuilt-loader-hash.sh
++++ b/build-scripts/prebuilt-loader-hash.sh
+@@ -3,7 +3,7 @@ set -e
+ 
+ echo -e "#include \"PrebuiltLoader.h\"\nint foo() { return sizeof(dyld4::PrebuiltLoader)+sizeof(mach_o::DependentDylibAttributes)+sizeof(dyld4::PrebuiltLoaderSet)+sizeof(dyld4::ObjCBinaryInfo)+sizeof(dyld4::Loader::DylibPatch)+sizeof(dyld4::Loader::FileValidationInfo); }\n" > ${DERIVED_FILE_DIR}/test.cpp
+ 
+-PLATFORM_SDK="macosx.internal"
++PLATFORM_SDK="${SDKROOT:-macosx}"
+ 
+ xcrun -sdk ${PLATFORM_SDK} clang++ -arch arm64 -std=c++2a -w -Wno-incompatible-sysroot -fsyntax-only -Xclang -fdump-record-layouts -Icommon -Idyld -Iinclude -Icache-builder -Icache_builder -Ilsl -Imach_o -Iinclude/mach-o ${DERIVED_FILE_DIR}/test.cpp > ${DERIVED_FILE_DIR}/test.out
+ 
+--- a/common/Defines.h
++++ b/common/Defines.h
+@@ -33,6 +33,30 @@
+ //TODO: EXCLAVES remove
+ #define TARGET_OS_EXCLAVEKIT 0
+ #endif
++#include <ptrauth.h>
++#ifndef __ptrauth_dyld_tpro0
++#if __has_feature(ptrauth_calls)
++#define __ptrauth_dyld_tpro0 __ptrauth(ptrauth_key_process_dependent_data, 1, 0)
++#else
++#define __ptrauth_dyld_tpro0
++#endif
++#endif
++#ifndef __ptrauth_dyld_tpro1
++#if __has_feature(ptrauth_calls)
++#define __ptrauth_dyld_tpro1 __ptrauth(ptrauth_key_process_dependent_data, 1, 0)
++#else
++#define __ptrauth_dyld_tpro1
++#endif
++#endif
++#ifndef SUPPORT_ARCH_arm64e
++#define SUPPORT_ARCH_arm64e 0
++#endif
++#ifndef SUPPORT_ARCH_arm64_32
++#define SUPPORT_ARCH_arm64_32 0
++#endif
++#ifndef SUPPORT_ARCH_armv7k
++#define SUPPORT_ARCH_armv7k 0
++#endif
+ 
+ #define VIS_HIDDEN      __attribute__((visibility("hidden")))
+ #define TRIVIAL_ABI     [[clang::trivial_abi]]
+--- a/dyld.xcodeproj/project.pbxproj
++++ b/dyld.xcodeproj/project.pbxproj
+@@ -3342,9 +3342,6 @@
+ 				F907E2490FA6469000BFEDBD /* install iPhone file */,
+ 			);
+ 			buildRules = (
+-				F921D318070376B0000D1056 /* PBXBuildRule */,
+-				F921D317070376A6000D1056 /* PBXBuildRule */,
+-				F921D3160703769A000D1056 /* PBXBuildRule */,
+ 			);
+ 			dependencies = (
+ 			);
+--- a/include/mach-o/dyld.h
++++ b/include/mach-o/dyld.h
+@@ -40,6 +40,9 @@ extern "C" {
+ #else
+  #define DYLD_DRIVERKIT_UNAVAILABLE
+ #endif
++#ifndef DYLD_EXCLAVEKIT_UNAVAILABLE
++#define DYLD_EXCLAVEKIT_UNAVAILABLE
++#endif
+ 
+ 
+ /*
+--- a/mach_o/Archive.h
++++ b/mach_o/Archive.h
+@@ -32,11 +32,6 @@
+ // mach_o
+ #include "Header.h"
+ 
+-// ld
+-#include <TargetConditionals.h>
+-#if !TARGET_OS_EXCLAVEKIT
+-#include "File.h"
+-#endif //!TARGET_OS_EXCLAVEKIT
+ 
+ namespace mach_o {
+ 

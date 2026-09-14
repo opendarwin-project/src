@@ -3,3 +3,6 @@
 /dev/xnu-meson-test
 /dev/dyld-src
 *.bin
+target/
+/result
+/result-*

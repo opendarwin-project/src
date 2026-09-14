@@ -1,0 +1,4 @@
+[submodule "rix"]
+	path = rix
+	url = https://github.com/tinted-software/rix.git
+	branch = canon
