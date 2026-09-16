@@ -1,4 +1,4 @@
-{ lib, stdenv, fetchurl, cmake, ninja  }:
+{ lib, stdenv, fetchurl }:
 
 stdenv.mkDerivation rec {
   pname = "iig-tools";
@@ -9,9 +9,11 @@ stdenv.mkDerivation rec {
     sha256 = "af82826fc33fca00dfa6d0496340993e58906695245923570f50e4c316e0a54e";
   };
 
-  nativeBuildInputs = [ cmake ninja ];
-
-  cmakeFlags = "-G Ninja";
+  buildCommand = ''
+    tar -xzf $src --strip-components=1
+    mkdir -p $out/bin
+    clang++ -std=c++17 -O2 -Iinclude src/main.cpp src/parse.cpp src/codegen.cpp -o $out/bin/iig
+  '';
 
   meta = {
     description = "I/O Kit Interface Generator (iig) implementation";

@@ -8,6 +8,7 @@
   arch ? (if stdenv.system == "x86_64-darwin" then "X86_64" else "ARM64"),
   kernelConfig ? "RELEASE",
   machineConfig ? (if arch == "X86_64" then "NONE" else "QEMU"),
+  sdkVersion ? (if arch == "X86_64" then "15.0" else "27.0"),
   extraMakeArgs ? "",
   kernelOutputName ? (if arch == "X86_64" then "xnu.${kernelConfig}_${arch}" else "xnu.${kernelConfig}_${arch}_${machineConfig}"),
   description ? "XNU kernel",
@@ -75,6 +76,7 @@ stdenv.mkDerivation {
       UNIFDEF="${unifdef}/bin/unifdef" \
       BUILD_WERROR=0 DO_CTFMERGE=0 \
       HOST_CODESIGN=true HOST_CODESIGN_ALLOCATE=true \
+      SDKVERSION="${sdkVersion}" \
       ARCH_CONFIGS="${arch}" \
       KERNEL_CONFIGS="${kernelConfig}" \
       TARGET_CONFIGS="${targetConfigs}" \
