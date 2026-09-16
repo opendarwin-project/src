@@ -12,6 +12,7 @@
   };
 
   patches = [
+    ./patches/0000-external-headers.patch
     ./patches/0001-firehose-no-kdk-tahoe-x86_64.patch
     ./patches/0002-simplify-san-lipo.patch
     ./patches/0003-dsymutil-no-process-substitution.patch
