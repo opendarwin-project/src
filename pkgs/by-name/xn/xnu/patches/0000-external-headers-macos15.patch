@@ -1,0 +1,5016 @@
+diff --git a/EXTERNAL_HEADERS/CodeSignature/Entitlements.h b/EXTERNAL_HEADERS/CodeSignature/Entitlements.h
+new file mode 100644
+index 00000000..89a43a4b
+--- /dev/null
++++ b/EXTERNAL_HEADERS/CodeSignature/Entitlements.h
+@@ -0,0 +1,192 @@
++#ifndef libCodeSignature_Entitlements_h
++#define libCodeSignature_Entitlements_h
++
++#include <sys/cdefs.h>
++__BEGIN_DECLS
++
++/* Default to __single indexable pointers for Firebloom */
++__ptrcheck_abi_assume_single();
++
++#include <CodeSignature/Return.h>
++#include <stdint.h>
++
++#pragma mark Entitlement Names
++
++/* Debugger */
++#define kCSDebuggerEntitlement "com.apple.private.cs.debugger"
++
++/* JIT */
++#define kCSPlatformJITEntitlement "dynamic-codesigning"
++#define kCSDeveloperJITEntitlement "com.apple.developer.cs.allow-jit"
++#define kCSAlternateJITEntitlement kCSDeveloperJITEntitlement
++
++/* Web Browser */
++#define kCSWebBrowserHostEntitlement                                           \
++  "com.apple.developer.web-browser-engine.host"
++#define kCSWebBrowserGPUEntitlement                                            \
++  "com.apple.developer.web-browser-engine.rendering"
++#define kCSWebBrowserNetworkEntitlement                                        \
++  "com.apple.developer.web-browser-engine.networking"
++#define kCSWebBrowserWebContentEntitlement                                     \
++  "com.apple.developer.web-browser-engine.webcontent"
++#define kCSEmbeddedWebBrowserEntitlement                                       \
++  "com.apple.developer.embedded-web-browser-engine"
++#define kCSWebBrowserEntitlement kCSWebBrowserWebContentEntitlement
++
++/* OOP-JIT */
++#define kCSOOPJITLoaderEntitlement "com.apple.private.oop-jit.loader"
++#define kCSOOPJITRunnerEntitlement "com.apple.private.oop-jit.runner"
++
++#pragma mark Abstraction
++
++/*
++ * Some build environments do not have any access to CoreEntitlements, which is
++ * the de-facto method for parsing and managing entitlements by this library.
++ *
++ * Our goal here is to allow entitlements based operations to be opt-outable in
++ * environments where CoreEntitlements isn't available or when entitlements are
++ * not required or supported.
++ */
++
++#if libCodeSignature_Config_NoEntitlements
++/* Configuration is opting out of supporting entitlements */
++#define libCodeSignature_Include_Entitlements 0
++#elif __has_include(<CoreEntitlements/V2/API.h>)
++/* Configuration is not opting out of supporting entitlements */
++#define libCodeSignature_Include_Entitlements 1
++#else
++/* Configuration doesn't support CoreEntitlements */
++#define libCodeSignature_Include_Entitlements 0
++#endif /* libCodeSignature_Config_NoEntitlements */
++
++/*
++ * The entitlements validation object becomes the abstraction layer for any and
++ * all operations against entitlement blobs. When CoreEntitlements is available
++ * and supported, all operations make use of it.
++ *
++ * When CoreEntitlements isn't available or not supported, all operations on
++ * entitlements return with an unsupported error.
++ */
++#if libCodeSignature_Include_Entitlements
++#include <CoreEntitlements/V2/API.h>
++
++typedef struct CERuntime EntitlementsRuntime_t;
++typedef CEContext_t EntitlementsContext_t;
++
++typedef CEContextType_t EntitlementsContextType_t;
++enum {
++  kEntitlementsContextTypeSignature = kCEContextTypeEntitlements,
++  kEntitlementsContextTypeProfile =
++      kCEContextTypeProvisioningProfileEntitlements
++};
++
++typedef CEType_t EntitlementsType_t;
++enum {
++  kEntitlementTypeUnknown = kCETypeUnknown,
++  kEntitlementTypeBool = kCETypeBool,
++  kEntitlementTypeInteger = kCETypeInteger,
++  kEntitlementTypeString = kCETypeString,
++  kEntitlementTypeSequence = kCETypeSequence,
++  kEntitlementTypeDictionary = kCETypeDictionary,
++  kEntitlementTypeData = kCETypeData
++};
++
++#else
++
++typedef uint8_t EntitlementsRuntime_t;
++typedef uint8_t EntitlementsContext_t;
++
++typedef uint8_t EntitlementsContextType_t;
++enum { kEntitlementsContextTypeSignature = 0, kEntitlementsContextTypeProfile };
++
++typedef uint8_t EntitlementsType_t;
++enum {
++  kEntitlementTypeUnknown = 0,
++  kEntitlementTypeBool,
++  kEntitlementTypeInteger,
++  kEntitlementTypeString,
++  kEntitlementTypeSequence,
++  kEntitlementTypeDictionary,
++  kEntitlementTypeData
++};
++
++#endif
++
++#pragma mark API
++
++/**
++ * Initialize an entitlements context with a provided DER entitlements blob. The
++ * DER blob range is sanity checked to ensure there are no overflows on the
++ * range.
++ *
++ * If entitlements are not supported by the environment, then this function will
++ * return `kCSReturnUnsupported`.
++ */
++CSReturn_t entitlementsInit(const EntitlementsRuntime_t *runtime,
++                            EntitlementsContextType_t type,
++                            EntitlementsContext_t *entitlements,
++                            const uint8_t *__counted_by(derBlobSize) derBlob,
++                            size_t derBlobSize);
++
++/**
++ * Perform a subset validation of two entitlement contexts to ensure that one
++ * context is a complete subset of the other. Both contexts must have originally
++ * been setup using `entitlementsInit`.
++ *
++ * If entitlements are not supported by the environment, then this function will
++ * return `kCSReturnUnsupported`.
++ */
++CSReturn_t entitlementsSubsetVerify(const EntitlementsContext_t *subSet,
++                                    const EntitlementsContext_t *superSet);
++
++/**
++ * Get the type represented by a particular entitlement within the entitlements
++ * context. If the context does not hold the entitlement, then a not found error
++ * is returned.
++ *
++ * NOTE: The library only exports a certain subset of the types supported by the
++ * entitlements. The `EntitlementsType_t` is an alias of `CEType_t` and callers
++ * outside of the library can match against all exported definitions for that
++ * type.
++ *
++ * If entitlements are not supported by the environment, then this function will
++ * return `kCSReturnUnsupported`.
++ */
++CSReturn_t entitlementsGetType(const EntitlementsContext_t *entitlements,
++                               const char *entitlementName,
++                               EntitlementsType_t *typeRet);
++
++/**
++ * Match the value of an entitlement within a context against a boolean value.
++ * The entitlement's value must be a boolean type.
++ *
++ * If entitlements are not supported by the environment, then this function will
++ * return `kCSReturnUnsupported`.
++ */
++CSReturn_t entitlementsMatchBoolean(const EntitlementsContext_t *ctx,
++                                    const char *entitlementName, bool value);
++
++/**
++ * Match the value of an entitlement within a context against an integer value.
++ * The entitlement's value must be an integer type.
++ *
++ * If entitlements are not supported by the environment, then this function will
++ * return `kCSReturnUnsupported`.
++ */
++CSReturn_t entitlementsMatchInteger(const EntitlementsContext_t *ctx,
++                                    const char *entitlementName,
++                                    uint64_t value);
++
++/**
++ * Match the value of an entitlement within a context against a string value.
++ * The entitlement's value may be a string type or a sequence type.
++ *
++ * If entitlements are not supported by the environment, then this function will
++ * return `kCSReturnUnsupported`.
++ */
++CSReturn_t entitlementsMatchString(const EntitlementsContext_t *ctx,
++                                   const char *entitlementName,
++                                   const char *value);
++
++__END_DECLS
++#endif /* libCodeSignature_Entitlements_h */
+diff --git a/EXTERNAL_HEADERS/CodeSignature/Return.h b/EXTERNAL_HEADERS/CodeSignature/Return.h
+new file mode 100644
+index 00000000..467e2e7d
+--- /dev/null
++++ b/EXTERNAL_HEADERS/CodeSignature/Return.h
+@@ -0,0 +1,252 @@
++/*
++ * Copyright (c) 2024 Apple Inc. All rights reserved.
++ */
++#ifndef libCodeSignature_Return_h
++#define libCodeSignature_Return_h
++
++#include <sys/cdefs.h>
++__BEGIN_DECLS
++
++/* Default to __single indexable pointers for Firebloom */
++__ptrcheck_abi_assume_single();
++
++#include <stdint.h>
++
++enum {
++    /* Public API -- Signature Validation Object */
++    kCSComponentInitSignature = 0x00,
++    kCSComponentParseSignature = 0x01,
++    kCSComponentEvaluateTrust = 0x02,
++    kCSComponentValidateConstraints = 0x03,
++    kCSComponentParseEntitlements = 0x04,
++    kCSComponentAssociateProfile = 0x05,
++    kCSComponentDisassociateProfile = 0x06,
++    kCSComponentLibraryValidation = 0x07,
++    kCSComponentGetTrustLevel = 0x08,
++    kCSComponentGetProfile = 0x09,
++    kCSComponentGetAddr = 0x0A,
++    kCSComponentGetBlobCount = 0x0B,
++    kCSComponentGetCodeDirectory = 0x0C,
++    kCSComponentGetBlobAtSlot = 0x0D,
++    kCSComponentGetBlobAtIndex = 0x0E,
++    kCSComponentGetEntitlementsContext = 0x0F,
++    kCSComponentCheckBoolEntitlement = 0x10,
++    kCSComponentCheckStringEntitlement = 0x11,
++    kCSComponentShrink = 0x12,
++    kCSComponentGetBlobInfo = 0x13,
++    kCSComponentValidateBlobIntegrity = 0x14,
++    kCSComponentGetUnusedBuffer = 0x15,
++    kCSComponentSetPath = 0x16,
++    kCSComponentGetUnusedBufferSize = 0x17,
++    kCSComponentGetRestrictedModePerms = 0x18,
++
++    /* Public API -- Profile Validation Object */
++    kCSComponentProfileInit = 0x20,
++    kCSComponentProfileVerify = 0x21,
++    kCSComponentProfileTrust = 0x22,
++    kCSComponentProfileGetData = 0x23,
++    kCSComponentProfileCheckCompat = 0x24,
++    kCSComponentProfileMatchEntitlements = 0x25,
++    kCSComponentProfileMatchTeamID = 0x26,
++    kCSComponentProfileMatchCert = 0x27,
++    kCSComponentProfileGetProperties = 0x28,
++    kCSComponentProfileGetCMS = 0x29,
++    kCSComponentProfileGetTeamID = 0x2A,
++    kCSComponentProfileGetContext = 0x2B,
++
++    /* Public API -- Code Directory */
++    kCSComponentGetVersion = 0x30,
++    kCSComponentGetFlags = 0x31,
++    kCSComponentGetSigningID = 0x32,
++    kCSComponentGetSpecialSlots = 0x33,
++    kCSComponentGetCodeSlots = 0x34,
++    kCSComponentGetCodeLimit = 0x35,
++    kCSComponentGetHashInfo = 0x36,
++    kCSComponentGetPlatformIdentifier = 0x37,
++    kCSComponentGetPageSize = 0x38,
++    kCSComponentGetTeamID = 0x39,
++    kCSComponentGetExecSeg = 0x3A,
++    kCSComponentGetRuntimeVersion = 0x3B,
++    kCSComponentGetLinkageHash = 0x3C,
++    kCSComponentGetLinkageApplication = 0x3D,
++    kCSComponentEvaluateCodeSlot = 0x3E,
++    kCSComponentEvaluateSpecialSlot = 0x3F,
++    kCSComponentGetSpecialSlot = 0x80,
++
++    /* Public API -- Entitlements */
++    kCSComponentEntitlementsInit = 0x40,
++    kCSComponentEntitlementsSubsetVerify = 0x41,
++    kCSComponentEntitlementsGetType = 0x42,
++    kCSComponentEntitlementsMatchBool = 0x43,
++    kCSComponentEntitlementsMatchInt = 0x44,
++    kCSComponentEntitlementsMatchString = 0x45,
++
++    /* Public API -- CMS Blobs */
++    kCSComponentCMSBlobInit = 0x50,
++    kCSComponentCMSBlobVerify = 0x51,
++    kCSComponentCMSBlobVerifyWithKey = 0x52,
++    kCSComponentCMSBlobVerifyAgilityHash = 0x53,
++    kCSComponentCMSBlobGetData = 0x54,
++    kCSComponentCMSBlobGetContent = 0x55,
++    kCSComponentCMSBlobGetLeafCert = 0x56,
++    kCSComponentCMSBlobGetDigestType = 0x57,
++    kCSComponentCMSBlobGetPolicyFlags = 0x58,
++
++    /* Internal validation functions */
++    kCSComponentValidateSuperblob = 0x60,
++    kCSComponentValidateGenericBlob = 0x61,
++    kCSComponentValidateCodeDirectory = 0x62,
++    kCSComponentValidateEntitlements = 0x63,
++
++    /* Internal code directory functions */
++    kCSComponentValidate0x20100 = 0x70,
++    kCSComponentValidate0x20200 = 0x71,
++    kCSComponentValidate0x20400 = 0x72,
++    kCSComponentValidate0x20500 = 0x73,
++    kCSComponentValidate0x20600 = 0x74,
++    kCSComponentFindCodeDirectory = 0x75,
++    kCSComponentValidateCodeDirectorySpecialBlobs = 0x76,
++    kCSComponentMatchCodeDirectory = 0x77,
++
++    /* Internal trust functions */
++    kCSComponentTrustCache = 0x90,
++    kCSComponentCoreTrust = 0x91,
++    kCSComponentLocalSigning = 0x92,
++    kCSComponentCompilationService = 0x93,
++    kCSComponentOOPJit = 0x94,
++
++    /* Internal constraint functions */
++    kCSComponentConstraintsEntitlements = 0xA0,
++    kCSComponentConstraintsSignatureType = 0xA1,
++    kCSComponentConstraintsDeveloperMode = 0xA2,
++    kCSComponentConstraintPlatform = 0xA3,
++    kCSComponentConstraintCompilationService = 0xA4,
++    kCSComponentConstraintLocalSigning = 0xA5,
++    kCSComponentConstraintProfile = 0xA6,
++    kCSComponentConstraintOOPJit = 0xA7,
++    kCSComponentConstraintPlatformCodeOnly = 0xA8,
++    kCSComponentConstraintTrustCacheCodeOnly = 0xA9,
++    kCSComponentConstraintResearchMode = 0xAA,
++    kCSComponentConstraintExResearchMode = 0xAB,
++    kCSComponentConstraintDeveloperLimit = 0xAC,
++
++    /* Internal library validation functions */
++    kCSComponentLVCompilationService = 0xB0,
++    kCSComponentLVOOPJit = 0xB1,
++    kCSComponentLVMobileAsset = 0xB2,
++
++    /* Internal profile validation functions */
++    kCSComponentProfileEntitlements = 0xC0,
++    kCSComponentProfileSetupProperties = 0xC1,
++    kCSComponentProfileEnforceProperties = 0xC2,
++    kCSComponentProfileMatchUPPTeam = 0xC3,
++    kCSComponentProfileMatchRPPTeam = 0xC4,
++    kCSComponentProfileVerifyUDID = 0xC5,
++    kCSComponentProfileMatchAudience = 0xC6,
++
++    /* Other internal functions */
++    kCSComponentComputeHash = 0xE0,
++    kCSComponentComputeCoreTrustHash = 0xE1,
++    kCSComponentRestrictedModeStatus = 0xE2,
++    kCSComponentRestrictedModeEnable = 0xE3,
++    kCSComponentRestrictedModePermit = 0xE4,
++    kCSComponentRestrictedModeAdjust = 0xE5,
++
++    /* Cannot exceed this value */
++    kCSComponentTotal = 0xFF,
++};
++
++enum {
++    kCSReturnSuccess = 0x00,
++
++    /* Generic error condition - avoid using this */
++    kCSReturnError = 0x01,
++
++    /* Missing initialization for components */
++    kCSReturnInitConfig = 0x02,
++    kCSReturnInitSignature = 0x03,
++    kCSReturnInitParse = 0x04,
++    kCSReturnInitInterimTrust = 0x05,
++    kCSReturnInitConstraints = 0x06,
++    kCSReturnInitCMS = 0x07,
++    kCSReturnInitProfile = 0x08,
++
++    /* Missing specific blobs */
++    kCSReturnMissingCodeDirectory = 0x10,
++    kCSReturnMissingEntitlements = 0x11,
++    kCSReturnMissingProfile = 0x12,
++
++    /* Specific error conditions */
++    kCSReturnUnderflow = 0x20,
++    kCSReturnOverflow = 0x21,
++    kCSReturnNoTrust = 0x22,
++    kCSReturnInsufficientLength = 0x23,
++    kCSReturnMissingData = 0x24,
++    kCSReturnExtraData = 0x25,
++    kCSReturnIncorrectType = 0x26,
++    kCSReturnIncorrectOffset = 0x27,
++    kCSReturnUnsupported = 0x28,
++    kCSReturnMismatch = 0x29,
++    kCSReturnAlignmentIssue = 0x2A,
++    kCSReturnDuplicate = 0x2B,
++    kCSReturnInvalidArguments = 0x2C,
++    kCSReturnInvalidSignatureType = 0x2D,
++    kCSReturnInvalidBinaryType = 0x2E,
++    kCSReturnInvalidProfile = 0x2F,
++    kCSReturnNotPermitted = 0x30,
++    kCSReturnInvalidString = 0x31,
++    kCSReturnShrinkNotSupported = 0x32,
++    kCSReturnUnsatisfiedEntitlement = 0x33,
++    kCSReturnDoubleInvocation = 0x34,
++    kCSReturnCoreTrustParseCMS = 0x35,
++    kCSReturnCoreTrustVerifyCMS = 0x36,
++    kCSReturnCoreTrustVerifyCerts = 0x37,
++    kCSReturnCoreTrustPolicyMismatch = 0x38,
++    kCSReturnCoreTrustParseKey = 0x39,
++    kCSReturnNotEnabled = 0x3A,
++    kCSReturnAuxiliaryFail = 0x3B,
++    kCSReturnStale = 0x3C,
++
++    /* Cannot exceed this value */
++    kCSReturnTotal = 0xFF
++};
++
++typedef struct _CSReturn {
++    union {
++        /* Raw 32 bit representation of the return code */
++        uint32_t rawValue;
++
++        /* Formatted representation of the return code */
++        struct {
++            /* Component of the library which is returning the code */
++            uint8_t component;
++
++            /* Error code which is being returned */
++            uint8_t error;
++
++            /* Unique error path within the component */
++            uint16_t uniqueError;
++        } __attribute__((packed));
++    } __attribute__((packed));
++} __attribute__((packed)) CSReturn_t;
++
++/* Ensure the size of the structure remains as expected */
++_Static_assert(sizeof(CSReturn_t) == sizeof(uint32_t),
++               "sizeof(CSReturn_t) != sizeof(uint32_t)");
++
++static inline CSReturn_t
++buildCSRet(uint8_t component,
++           uint8_t error,
++           uint16_t uniqueError)
++{
++    CSReturn_t ret = {
++        .component = component,
++        .error = error,
++        .uniqueError = uniqueError
++    };
++
++    return ret;
++}
++
++__END_DECLS
++#endif /* libCodeSignature_Return_h */
+diff --git a/EXTERNAL_HEADERS/CoreEntitlements/V2/API.h b/EXTERNAL_HEADERS/CoreEntitlements/V2/API.h
+new file mode 100644
+index 00000000..9d440c57
+--- /dev/null
++++ b/EXTERNAL_HEADERS/CoreEntitlements/V2/API.h
+@@ -0,0 +1,522 @@
++#ifndef CoreEntitlements_V2_API_h
++#define CoreEntitlements_V2_API_h
++
++#include <sys/cdefs.h>
++__BEGIN_DECLS
++
++/* Default to __single indexable pointers for Firebloom */
++__ptrcheck_abi_assume_single();
++
++#include <stdint.h>
++#include <CoreEntitlements/V2/Context.h>
++
++#pragma mark Types
++
++/**
++ * ASN1 strings (specifically UTF8STRING) are not NULL terminated, which makes
++ * them different from C-strings.
++ *
++ * This data type is used to provide a representation for such types.
++ */
++typedef struct _CEString {
++    const uint8_t *__counted_by(length) data;
++    size_t length;
++} CEString_t;
++
++/**
++ * This data type is used to provide a representation for ASN1 based OCTET-STRING
++ * types.
++ */
++typedef struct _CEData {
++    const uint8_t *__counted_by(length) data;
++    size_t length;
++} CEData_t;
++
++/**
++ * This data type is used as a generic buffer for holding arbitrary data. This is
++ * separated from "CEString_t" and "CEData_t" as those types are for specific ASN1
++ * types.
++ */
++typedef struct _CEBuffer {
++    const uint8_t *__counted_by(length) data;
++    size_t length;
++} CEBuffer_t;
++
++typedef struct _CEIterateArgs {
++    size_t index;
++    void *userData;
++
++    /*
++     * In some cases, a caller may wish to halt iteration of further elements even
++     * when there is no error encountered. For such situations, the caller may set
++     * this value in their iteration function.
++     */
++    bool stopIteration;
++} CEIterateArgs_t;
++
++typedef struct _CEValueTypePair {
++    /*
++     * The type and value of the element being operated on for the current invocation
++     * of the iteration function.
++     */
++    CEType_t derType;
++    CEElement_t derValue;
++} CEValueTypePair_t;
++
++typedef struct _CEKeyValuePair {
++    /*
++     * The DER key present within a dictionary. The key is always paired with a
++     * value, and the key is always expected to be of type kCETypeString.
++     */
++    CEElement_t derKey;
++
++    /*
++     * The DER value paired with the key represented by derKey. The value can be
++     * of any supported type.
++     */
++    CEValueTypePair_t valueTypePair;
++} CEKeyValuePair_t;
++
++typedef CEReturn_t
++(*CEDictionaryIterate_t)(const CEKeyValuePair_t *keyValuePair,
++                         CEIterateArgs_t *iterateArgs);
++
++typedef CEReturn_t
++(*CEElementIterate_t)(const CEValueTypePair_t *valueTypePair,
++                      CEIterateArgs_t *iterateArgs);
++
++#pragma mark API - Context
++
++/**
++ * Initialize a CoreEntitlements context based on a DER data range against constraints
++ * specific for a specific context type. This is currently not supported.
++ */
++CEReturn_t
++CEContextInitWithType(const CEContextType_t type,
++                      CEContext_t *context,
++                      const uint8_t *__counted_by(derLength) derData,
++                      size_t derLength);
++
++/**
++ * Initialize a CoreEntitlements context based on a DER data range against constraints
++ * specific for a specific context type. This uses the older legacy validation routines,
++ * and requires the legacy runtime structure to be provided.
++ */
++CEReturn_t
++CEContextInitWithTypeLegacy(const struct CERuntime *runtime,
++                            const CEContextType_t type,
++                            CEContext_t *context,
++                            const uint8_t *__counted_by(derLength) derData,
++                            size_t derLength);
++
++/**
++ * Return an opaque pointer to the legacy context structure used by the V1 implementation
++ * of CoreEntitlements. This API is only functional when the context is initialized using
++ * the `CEContextInitWithTypeLegacy` API.
++ *
++ * This API is primed for deprecation soon, and should not be used unless the caller
++ * understands what they're doing.
++ */
++CEReturn_t
++CEContextGetLegacyContext(const CEContext_t *context,
++                          const void **legacyContext);
++
++/**
++ * Create the context structure used by the V1 implementation of CoreEntitlements. This
++ * API can be useful when the context is initialized using the `CEContextInitWithType`
++ * API, but a legacy context is required sometimes for compatibility. Legacy context
++ * will not include any acceleration information, even if the context is accelerated.
++ *
++ * This API requires the caller to provide an allocated instance of the legacy context
++ * structure. This API does not perform any allocations on its own.
++ *
++ * This API is primed for deprecation soon, and should not be used unless the caller
++ * understands what they're doing.
++ */
++CEReturn_t
++CEContextCreateAsLegacyContext(const CEContext_t *context,
++                               const struct CERuntime *legacyRuntime,
++                               struct CEQueryContext *legacyContext);
++
++/**
++ * Return the top-level dictionary associated with this CoreEntitlements context. This
++ * dictionary can then be operated and iterated upon using any of the element parsing
++ * APIs.
++ *
++ * This dictionary is tied to the life-time of the `derData` which was used to setup the
++ * context and is managed by the caller directly.
++ */
++CEReturn_t
++CEContextGetDictionary(const CEContext_t *context,
++                       const CEElement_t **derDictionary);
++
++/**
++ * Iterate through the top-level dictionary within the CoreEntitlements context and
++ * match against a specified key.
++ *
++ * This is the only method to take advantage of context acceleration for supported
++ * environments. Accelerated queries run in `O(log(n))` instead of `O(n)`, where
++ * `n` is the number of keys within the top-level dictionary. This results in a significant
++ * performance boost.
++ */
++CEReturn_t
++CEContextValueForKey(const CEContext_t *context,
++                     const char *keyName,
++                     CEElement_t *derValue);
++
++/**
++ * This is the same as `CEContextValueForKey` except this operation can be used for
++ * selecting a key from a source which does not have a NULL terminated key name.
++ *
++ * This is useful in cases where the `keyName` itself is obtained from another DER
++ * formatted data structure.
++ */
++CEReturn_t
++CEContextValueForKeyAsCEString(const CEContext_t *context,
++                               const CEString_t *keyName,
++                               CEElement_t *derValue);
++
++/**
++ * Check if a context is a subset of another context. Each context represents a
++ * dictionary, and this verifies that all the elements from the `subset` dictionary
++ * are fully contained within the `superset` dictionary.
++ *
++ * The definition of containership in this case is complex. These are the rules by which
++ * containership is assessed:
++ *
++ *  - Every key within the `subset` must exist within the `superset`.
++ *
++ *  - The type of the key in the `superset` must either match the type of the `subset`
++ *  or it must be a container type. The only valid container type is `kCETypeSequence`,
++ *  and the containership only applies when the key within the `subset` is of type
++ *  `kCETypeInteger` or `kCETypeString`.
++ *
++ *  - Value matching rules for every key in the `subset`:
++ *   - Booleans must match the `superset`  _as is_.
++ *   - Integers must be contained within the `superset` (`CEElementContainsInteger`).
++ *   - Strings must be contained within the `superset`  (`CEElementContainsString`).
++ *   - All elements of an array must exist in the `superset` and match based on the
++ *   above rules.
++ *
++ *  - If the value of a key within the `superset` is `*`, then the `subset` is allowed to
++ *  have any value and type for that same key.
++ *
++ *  - All nested dictionaries within the `subset` are evaluated recursively based on the
++ *  above rule set.
++ *
++ * This operation is currently only supported under very specific circumstances.
++ * The `superset` must be `kCEContextTypeProvisioningProfileEntitlements` and the
++ * subset must be `kCEContextTypeEntitlements`.
++ *
++ * If the subset check is successful, a `kCEReturnSuccess` is returned, or an error
++ * otherwise.
++ */
++CEReturn_t
++CEContextCheckSubset(const CEContext_t *subset,
++                     const CEContext_t *superset);
++
++#pragma mark API - Element Iterate
++
++/**
++ * Iterate through all the key-value pairs within a dictionary and perform any
++ * required operation.
++ *
++ * Returning anything other than `kCEReturnSuccess` from the `iterationFunction`
++ * results in termination of the iteration, with the error value being returned from
++ * this function.
++ *
++ * Using this API on anything other than an element of type `kCETypeDictionary` will
++ * return `kCEReturnNotSupported`.
++ */
++CEReturn_t
++CEDictionaryIterate(const CEElement_t *derDictionary,
++                    const CEDictionaryIterate_t iterateFunction,
++                    void *userCtx);
++
++/**
++ * Iterate through all the elements within an iterable element type and perform any
++ * required operation. For more information on the iteration, take a look at the definition
++ * for `CEElementIterate_t`.
++ *
++ * Returning anything other than `kCEReturnSuccess` from the `iterationFunction`
++ * results in termination of the iteration, with the error value being returned from
++ * this function.
++ *
++ * Using this API on non-iterable types will return `kCEReturnNotSupported`. Only
++ * arrays and dictionaries are iterable types.
++ *
++ * A dictionary is a sequence of sequences. The inner level sequence will contain two
++ * elements -- a key (UTF8STRING) and a value (any supported type).
++ */
++CEReturn_t
++CEElementIterate(const CEElement_t *derElement,
++                 const CEElementIterate_t iterateFunction,
++                 void *userCtx);
++
++#pragma mark API - Index Query
++
++/**
++ * Get the count of nested elements residing under container elements such as sequences
++ * and dictionaries. For sequences, this function returns the number of elements within the
++ * sequence, and for dictionaries, it returns the number of key-value pairs.
++ *
++ * Only elements of typr `kCETypeSequence` and `kCETypeDictionary` are supported
++ * through this API.
++ */
++CEReturn_t
++CEElementGetIndexCount(const CEElement_t *derElement,
++                       size_t *indexCount);
++
++/**
++ * Iterate through a sequence and return the value of the element present at the
++ * specified index.
++ *
++ * This function should only be used when the caller knows the index they're looking
++ * for. Using this function to iterate over the sequence will result in a O(n^2) operation.
++ * For iterating over the sequence, we recommend using the `CEElementIterate`
++ * function.
++ */
++CEReturn_t
++CESequenceValueForIndex(const CEElement_t *derSequence,
++                        size_t index,
++                        CEElement_t *derValue);
++
++/**
++ * Iterate through a dictionary and return the key-value pair present at the specified
++ * index.
++ *
++ * This function should only be used when the caller knows the index they're looking
++ * for. Using this function to iterate over the dictionary will result in a O(n^2) operation.
++ * For iterating over the dictionary, we recommend using the `CEDictionaryIterate`
++ * function.
++ */
++CEReturn_t
++CEDictionaryValueForIndex(const CEElement_t *derDictionary,
++                          size_t index,
++                          CEKeyValuePair_t *keyValuePair);
++
++#pragma mark API - Key Query
++
++/**
++ * Iterate through all the keys within a dictionary and search for a particular key.
++ * If the key is matched on, then its value is returned through the arguments.
++ */
++CEReturn_t
++CEDictionaryValueForKey(const CEElement_t *derDictionary,
++                        const char *keyName,
++                        CEElement_t *derValue);
++
++/**
++ * This is the same as `CEDictionaryValueForKey` except this operation can be used
++ * for selecting a key from a source which does not have a NULL terminated key name.
++ *
++ * This is useful in cases where the `keyName` itself is obtained from another DER
++ * formatted data structure.
++ */
++CEReturn_t
++CEDictionaryValueForKeyAsCEString(const CEElement_t *derDictionary,
++                                  const CEString_t *keyName,
++                                  CEElement_t *derValue);
++
++#pragma mark API - Element Query
++
++/**
++ * Parse the type of an element and return its value. Not all ASN1 types are supported
++ * and upon success, the value returned will be one of the types supported by the
++ * library.
++ */
++CEReturn_t
++CEElementGetType(const CEElement_t *derElement,
++                 CEType_t *typeRet);
++
++/**
++ * Acquire the raw bytes which represent the DER element. These raw bytes include
++ * the tag and the length bytes of the DER element.
++ */
++CEReturn_t
++CEElementGetCEBuffer(const CEElement_t *derElement,
++                     CEBuffer_t *bufferRet);
++
++/**
++ * Acquire the raw bytes which represent the value of the DER element. These raw
++ * bytes do not include the tag and the length bytes, but only the value bytes.
++ */
++CEReturn_t
++CEElementGetValueAsCEBuffer(const CEElement_t *derElement,
++                            CEBuffer_t *bufferRet);
++
++/**
++ * Attempt to parse the element as a boolean and return its value. Upon success, the
++ * value of the boolean element is returned, otherwise an appropriate error.
++ */
++CEReturn_t
++CEElementGetBool(const CEElement_t *derElement,
++                 bool *valueRet);
++
++/**
++ * Attempt to parse the element as an integer and return its value. Upon success, the
++ * value of the integer element is returned, otherwise an appropriate error.
++ */
++CEReturn_t
++CEElementGetInteger(const CEElement_t *derElement,
++                    int64_t *valueRet);
++
++/**
++ * Attempt to parse the element as a string and return its value. Upon success, the
++ * value of the string element is returned, otherwise an appropriate error.
++ *
++ * The string returned may not be NULL terminated.
++ */
++CEReturn_t
++CEElementGetString(const CEElement_t *derElement,
++                   CEString_t *valueRet);
++
++/**
++ * Attempt to parse the element as data and return its value. Upon success, a pointer
++ * to the data and its length is returned, otherwise an appropriate error.
++ */
++CEReturn_t
++CEElementGetData(const CEElement_t *derElement,
++                 CEData_t *valueRet);
++
++/**
++ * Match an element against a boolean value. The element is parsed as a boolean
++ * before the match, and the match is attempted only when the parsing is successful.
++ */
++CEReturn_t
++CEElementMatchBool(const CEElement_t *derElement,
++                   bool matchBool);
++
++/**
++ * Match an element against an integer value. The element is parsed as an integer
++ * before the match, and the match is attempted only when the parsing is successful.
++ */
++CEReturn_t
++CEElementMatchInteger(const CEElement_t *derElement,
++                      uint64_t matchInteger);
++
++/**
++ * Match an element against a string value. The element is parsed as a string
++ * before the match, and the match is attempted only when the parsing is successful.
++ *
++ * This API _does not_ perform a wildcard match, and if the `derElement` contains
++ * any `*` characters, they are treated as regular character bytes.
++ */
++CEReturn_t
++CEElementMatchString(const CEElement_t *derElement,
++                     const char *matchString);
++
++/**
++ * Same as `CEElementMatchString` except this API can be used for matching against
++ * strings which may not be NULL terminated.
++ */
++CEReturn_t
++CEElementMatchStringWithCEString(const CEElement_t *derElement,
++                                 const CEString_t *matchString);
++
++/**
++ * Match an element against a string value. The element is parsed as a string
++ * before the match, and the match is attempted only when the parsing is successful.
++ *
++ * This API _does_ perform a wildcard match. The wildcard `*` is only honored:
++ *  - When it appears on `derElement`, AND
++ *  - When it is the _last_ character in the string.
++ *
++ * In all other cases, a `*` is treated as a regular character byte.
++ */
++CEReturn_t
++CEElementMatchStringWithWildcard(const CEElement_t *derElement,
++                                 const char *matchString);
++
++/**
++ * Same as `CEElementMatchStringWithWildcard` except this API can be used for matching
++ * against strings which may not be NULL terminated.
++ */
++CEReturn_t
++CEElementMatchStringWithCEStringAndWildcard(const CEElement_t *derElement,
++                                            const CEString_t *matchString);
++
++/**
++ * Match an element against some data. The element is parsed as data before the
++ * match, and the match is attempted only when the parsing is successful.
++ */
++CEReturn_t
++CEElementMatchData(const CEElement_t *derElement,
++                   const CEData_t *matchData);
++
++/**
++ * Same as `CEElementMatchInteger` except this API will also accept the `derElement`
++ * as an array, and perform a containership check for the integer within the array.
++ */
++CEReturn_t
++CEElementContainsInteger(const CEElement_t *derElement,
++                         int64_t containedInteger);
++
++/**
++ * Same as `CEElementMatchString` except this API will also accept the `derElement`
++ * as an array, and perform a containership check for the string within the array.
++ */
++CEReturn_t
++CEElementContainsString(const CEElement_t *derElement,
++                        const char *containedString);
++
++/**
++ * Same as `CEElementContainsString` except this API can be used for
++ * performing a containership check for a string which may not be NULL terminated.
++ */
++CEReturn_t
++CEElementContainsStringWithCEString(const CEElement_t *derElement,
++                                    const CEString_t *containedString);
++
++/**
++ * Same as `CEElementMatchStringWithWildcard` except this API will also accept the
++ * `derElement` as an array, and perform a containership check for the string with a
++ * wildcard within the array.
++ */
++CEReturn_t
++CEElementContainsStringWithWildcard(const CEElement_t *derElement,
++                                    const char *containedString);
++
++/**
++ * Same as `CEElementContainsStringWithWildcard` except this API can be used for
++ * performing a containership check for a string with a wildcard which may not be NULL
++ * terminated.
++ */
++CEReturn_t
++CEElementContainsStringWithCEStringAndWildcard(const CEElement_t *derElement,
++                                               const CEString_t *containedString);
++
++/**
++ * Same as `CEElementMatchData` except this API will also accept the `derElement`
++ * as an array, and perform a containership check for the data within the array.
++ */
++CEReturn_t
++CEElementContainsData(const CEElement_t *derElement,
++                      const CEData_t *containedData);
++
++#pragma mark API - CEString
++
++int32_t
++CEStringCompare(const CEString_t *derString,
++                const char *string);
++
++int32_t
++CEStringCompareWithCEString(const CEString_t *derString0,
++                            const CEString_t *derString1);
++
++int32_t
++CEStringComparePrefix(const CEString_t *derString,
++                      const char *prefix);
++
++int32_t
++CEStringComparePrefixWithCEString(const CEString_t *derString,
++                                  const CEString_t *derPrefix);
++
++#pragma mark API - Conditional
++
++#include <CoreEntitlements/V2/Closure.h>
++#include <CoreEntitlements/V2/StackProtector.h>
++#include <CoreEntitlements/V2/Acceleration.h>
++
++__END_DECLS
++#endif /* CoreEntitlements_V2_API_h */
+diff --git a/EXTERNAL_HEADERS/CoreEntitlements/V2/Acceleration.h b/EXTERNAL_HEADERS/CoreEntitlements/V2/Acceleration.h
+new file mode 100644
+index 00000000..ecd5295a
+--- /dev/null
++++ b/EXTERNAL_HEADERS/CoreEntitlements/V2/Acceleration.h
+@@ -0,0 +1,78 @@
++#ifndef CoreEntitlements_V2_Acceleration_h
++#define CoreEntitlements_V2_Acceleration_h
++
++#include <sys/cdefs.h>
++__BEGIN_DECLS
++
++/* Default to __single indexable pointers for Firebloom */
++__ptrcheck_abi_assume_single();
++
++#include <stdint.h>
++#include <CoreEntitlements/V2/Return.h>
++
++/*
++ * The environment where the library is being linked must provide the implementation
++ * for the following functions in order to make use of the acceleration APIS.
++ *
++ * extern uint8_t *__counted_by(allocSize)
++ * CEEnvironmentAllocate(size_t allocSize);
++ *
++ * extern void
++ * CEEnvironmentFree(uint8_t *__counted_by(allocSize) allocData,
++ *                   size_t allocSize);
++ */
++
++/*
++ * Macro to calculate the length of the acceleration index based on the number of
++ * elements present.
++ */
++#define CEIndexLengthForCount(num) (num * sizeof(CEElementIndex_t))
++
++/**
++ * Evaluate the DER data range within the CoreEntitlements context to check if the
++ * context is eligible for acceleration or not. As part of this, the API also returns
++ * the size of the allocation required for accelerating the context.
++ *
++ * Acceleration requires the environment to support both allocation and deallocation
++ * of memory.
++ */
++CEReturn_t
++CEContextEvaluateAcceleration(const CEContext_t *context,
++                              size_t *sizeRet);
++
++/**
++ * Check if the provided CoreEntitlements context to see if it has been accelerated
++ * or not. If accelerated, this function will return `kCEReturnSuccess` or the error
++ * `kCEReturnNoAcceleration` otherwise.
++ */
++CEReturn_t
++CEContextCheckAcceleration(const CEContext_t *context);
++
++/**
++ * Evaluate the DER data range within the CoreEntitlements context, and if eligible,
++ * create a memory allocation through the environment for an index which will then be
++ * used to improve performance of key look ups against the CoreEntitlements context.
++ *
++ * This operation requires environmental support for allocating and deallocating
++ * memory, as the acceleration algorithm creates an index which aids with look ups.
++ *
++ * The size of the required allocation can be found by calling `CEEvaluateAcceleration`.
++ * This can be useful for certain environments, which may need to ensure that the required
++ * amount of memory is made available ahead of time, before attempting to actually
++ * accelerate the context.
++ *
++ * The only operation which is accelerated is `CESearchKey`.
++ */
++CEReturn_t
++CEContextAccelerate(CEContext_t *context);
++
++/**
++ * Free the index allocation made previously and return the memory back to the caller.
++ * After this operation, key look ups against the CoreEntitlements context will no
++ * longer go through the index, but instead go through the slower path.
++ */
++CEReturn_t
++CEContextDecelerate(CEContext_t *context);
++
++__END_DECLS
++#endif /* CoreEntitlements_V2_Acceleration_h */
+diff --git a/EXTERNAL_HEADERS/CoreEntitlements/V2/Closure.h b/EXTERNAL_HEADERS/CoreEntitlements/V2/Closure.h
+new file mode 100644
+index 00000000..3dd5cdd1
+--- /dev/null
++++ b/EXTERNAL_HEADERS/CoreEntitlements/V2/Closure.h
+@@ -0,0 +1,111 @@
++#ifndef CoreEntitlements_V2_Closure_h
++#define CoreEntitlements_V2_Closure_h
++
++#include <sys/cdefs.h>
++__BEGIN_DECLS
++
++/* Default to __single indexable pointers for Firebloom */
++__ptrcheck_abi_assume_single();
++
++#include <stdint.h>
++#include <CoreEntitlements/V2/Return.h>
++
++/* Closure based functions provided by default */
++#ifndef libCoreEntitlements_Config_Closure
++#ifdef __BLOCKS__
++#define libCoreEntitlements_Config_Closure 1
++#else
++#define libCoreEntitlements_Config_Closure 0
++#endif
++#endif /* !defined(libCoreEntitlements_Config_Closure) */
++
++/* Validate that we can use closures */
++#if libCoreEntitlements_Config_Closure && !defined(__BLOCKS__)
++#error "Configured libCoreEntitlements_Config_Closure without __BLOCKS__"
++#endif
++
++#if libCoreEntitlements_Config_Closure
++
++#pragma mark Type Defines
++
++typedef CEReturn_t
++(^CEDictionaryIterateClosure_t)(const CEKeyValuePair_t *keyValuePair,
++                                CEIterateArgs_t *iterateArgs);
++
++typedef CEReturn_t
++(^CEElementIterateClosure_t)(const CEValueTypePair_t *valueTypePair,
++                             CEIterateArgs_t *iterateArgs);
++
++#pragma mark Types
++
++typedef struct _CEClosureFunctionPointer {
++    const CEDictionaryIterateClosure_t dictionaryIterate;
++    const CEElementIterateClosure_t elementIterate;
++} CEClosureFunctionPointer_t;
++
++#pragma mark Static Functions
++
++static inline CEReturn_t
++_CEClosureCallbackDictionary(const CEKeyValuePair_t *keyValuePair,
++                             CEIterateArgs_t *iterateArgs)
++{
++    const CEClosureFunctionPointer_t *__single args = (CEClosureFunctionPointer_t*)iterateArgs->userData;
++
++    /* Directly call the iterator */
++    return args->dictionaryIterate(keyValuePair, iterateArgs);
++}
++
++static inline CEReturn_t
++_CEClosureCallbackElement(const CEValueTypePair_t *valueTypePair,
++                          CEIterateArgs_t *iterateArgs)
++{
++    const CEClosureFunctionPointer_t *__single args = (CEClosureFunctionPointer_t*)iterateArgs->userData;
++
++    /* Directly call the iterator */
++    return args->elementIterate(valueTypePair, iterateArgs);
++}
++
++/**
++ * Iterate through all the key-value pairs within a dictionary and perform any
++ * required operation.
++ *
++ * This function behaves identically to `CEDictionaryIterate`, except that it
++ * uses a closure block instead of a function pointer.
++ *
++ * The `userData` field of the `iterateArgs` parameter should not be mutated
++ * by the closure.
++ */
++static inline CEReturn_t
++CEDictionaryIterateWithClosure(const CEElement_t *derDictionary,
++                               const CEDictionaryIterateClosure_t iterateClosure)
++{
++    CEClosureFunctionPointer_t callback = {
++        .dictionaryIterate = iterateClosure
++    };
++    return CEDictionaryIterate(derDictionary, _CEClosureCallbackDictionary, &callback);
++}
++
++/**
++ * Iterate through all the elements within an iterable element type and perform any
++ * required operation.
++ *
++ * This function behaves identically to `CEElementIterate`, except that it
++ * uses a closure block instead of a function pointer.
++ *
++ * The `userData` field of the `iterateArgs` parameter should not be mutated
++ * by the closure.
++ */
++static inline CEReturn_t
++CEElementIterateWithClosure(const CEElement_t *derElement,
++                            const CEElementIterateClosure_t iterateClosure)
++{
++    CEClosureFunctionPointer_t callback = {
++        .elementIterate = iterateClosure
++    };
++    return CEElementIterate(derElement, _CEClosureCallbackElement, &callback);
++}
++
++#endif /* libCoreEntitlements_Config_Closure */
++
++__END_DECLS
++#endif /* CoreEntitlements_V2_Closure_h */
+diff --git a/EXTERNAL_HEADERS/CoreEntitlements/V2/Context.h b/EXTERNAL_HEADERS/CoreEntitlements/V2/Context.h
+new file mode 100644
+index 00000000..b30d97d9
+--- /dev/null
++++ b/EXTERNAL_HEADERS/CoreEntitlements/V2/Context.h
+@@ -0,0 +1,106 @@
++#ifndef CoreEntitlements_V2_Context_h
++#define CoreEntitlements_V2_Context_h
++
++#include <sys/cdefs.h>
++__BEGIN_DECLS
++
++/* Default to __single indexable pointers for Firebloom */
++__ptrcheck_abi_assume_single();
++
++#include <stdint.h>
++#include <CoreEntitlements/V2/Return.h>
++
++#pragma mark Type Defines
++
++typedef CEQueryOperation_t CEQuerySequence_t;
++typedef uint32_t CEApplicationVersion_t;
++
++#pragma mark Types
++
++typedef struct _CEElement {
++    DERItem derData;
++    DERDecodedInfo derDecoded;
++} CEElement_t;
++
++typedef struct _CEElementIndex {
++    /*
++     * Offset of the key and value from the beginning of the index. Spec validation
++     * doesn't really care if the offset is larger than UINT32_MAX, but we enforce that
++     * for acceleration, a context becomes ineligible if it is very large.
++     */
++    uint32_t keyOffset;
++    uint32_t valueOffset;
++} CEElementIndex_t;
++
++/*
++ * We need to be very conservative with how much memory we consume for acceleration
++ * of a context. Many other components are tied to the idea of each indexed element
++ * only consuming 8 bytes (such as PPL/AMFI/TXM).
++ */
++_Static_assert(sizeof(CEElementIndex_t) == 8, "sizeof(CEElementIndex_t) != 8");
++
++/*
++ * Each context type maps to a set of constraints, which are validated when a context
++ * is initialized. Each context can be limited in the set of types it supports along
++ * with some other bespoke rules.
++ */
++typedef struct _CEContextConstraints {
++    struct {
++        bool boolean : 1;
++        bool integer : 1;
++        bool string : 1;
++        bool array : 1;
++        bool dictionary : 1;
++        bool data : 1;
++        bool utcTime : 1;
++        bool numericString : 1;
++        bool application : 1;
++    } allowedTypes;
++
++    /*
++     * Constraint to allow heterogenous elements in arrays. When this is enabled,
++     * we let array values contain elements of different types. Otherwise, the type
++     * of the first element in the array is considered the de-facto type for each
++     * of the elements in the array.
++     */
++    bool allowMultiTypeArrays : 1;
++
++    /*
++     * The version of the DER encoding imposes certain constraints. This is set as
++     * a runtime parameter on the constraints.
++     *
++     * 1. Version 0 encoding is not expected to have sorted keys, whereas version 1
++     * and above are.
++     */
++    CEApplicationVersion_t version;
++} CEContextConstraints_t;
++
++typedef enum __attribute__((enum_extensibility(closed))) : uint8_t {
++    kCEContextTypeEntitlements = 0,
++    kCEContextTypeProvisioningProfileEntitlements = 1,
++    kCEContextTypeProvisioningProfile = 2,
++    kCEContextTypeLWCR = 3,
++    kCEContextTypeGeneric = 4,
++    kCEContextTypeTotal,
++} CEContextType_t;
++
++typedef struct _CEContextInfo {
++    CEContextType_t type;
++    CEApplicationVersion_t version;
++} CEContextInfo_t;
++
++typedef struct _CEContext {
++    CEContextInfo_t info;
++    CEElement_t dictionary;
++
++    /* Acceleration index */
++    const CEElementIndex_t *__counted_by(indexCount) index;
++    size_t indexCount;
++
++    /* Context used with the legacy setup API */
++    struct CEQueryContext legacyContext;
++    bool legacyContextSetup;
++} CEContext_t;
++
++__END_DECLS
++#endif /* CoreEntitlements_V2_Context_h */
+diff --git a/EXTERNAL_HEADERS/CoreEntitlements/V2/Kernel.h b/EXTERNAL_HEADERS/CoreEntitlements/V2/Kernel.h
+new file mode 100644
+index 00000000..ffde715c
+--- /dev/null
++++ b/EXTERNAL_HEADERS/CoreEntitlements/V2/Kernel.h
+@@ -0,0 +1,63 @@
++#ifndef CORE_ENTITLEMENTS_V2_KERNEL_H
++#define CORE_ENTITLEMENTS_V2_KERNEL_H
++
++#include <stdbool.h>
++#include <stdint.h>
++#include <CoreEntitlements/CoreEntitlements.h>
++#include <CoreEntitlements/der_vm.h>
++
++struct CEQueryContext;
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++typedef struct coreentitlements_kernel_api {
++    uint32_t version;
++    CEError_t kNoError;
++    CEError_t kMalformedEntitlements;
++    CEError_t kNotEligibleForAcceleration;
++
++    const char *(*GetErrorString)(CEError_t error);
++
++    CEError_t (*ContextQuery)(CEQueryContext_t ctx,
++        const CEQueryOperation_t *__counted_by(queryLength) query,
++        size_t queryLength);
++
++    CEError_t (*Validate)(const CERuntime_t rt,
++        CEValidationResult *result,
++        const uint8_t *__ended_by(blob_end) blob,
++        const uint8_t *blob_end);
++
++    CEError_t (*AcquireUnmanagedContext)(const CERuntime_t rt,
++        CEValidationResult validationResult,
++        struct CEQueryContext *ctx);
++
++    der_vm_context_t (*der_vm_context_create)(const CERuntime_t rt,
++        ccder_tag dictionary_tag,
++        bool sorted_keys,
++        const uint8_t *__ended_by(der_end) der,
++        const uint8_t *der_end);
++
++    der_vm_context_t (*der_vm_execute)(der_vm_context_t context,
++        CEQueryOperation_t op);
++
++    der_vm_context_t (*der_vm_execute_seq)(der_vm_context_t context,
++        const CEQueryOperation_t *__counted_by(queryLength) query,
++        size_t queryLength);
++
++    bool (*der_vm_context_is_valid)(der_vm_context_t context);
++    bool (*der_vm_bool_from_context)(der_vm_context_t context);
++
++    CEError_t (*IndexSizeForContext)(CEQueryContext_t ctx, size_t *size);
++    CEError_t (*BuildIndexForContext)(CEQueryContext_t ctx);
++    bool (*ContextIsAccelerated)(CEQueryContext_t ctx);
++} coreentitlements_kernel_api;
++
++typedef struct coreentitlements_kernel_api CEKernelAPI_t;
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* CORE_ENTITLEMENTS_V2_KERNEL_H */
+diff --git a/EXTERNAL_HEADERS/CoreEntitlements/V2/Return.h b/EXTERNAL_HEADERS/CoreEntitlements/V2/Return.h
+new file mode 100644
+index 00000000..18c9ef4d
+--- /dev/null
++++ b/EXTERNAL_HEADERS/CoreEntitlements/V2/Return.h
+@@ -0,0 +1,111 @@
++#ifndef CoreEntitlements_V2_Return_h
++#define CoreEntitlements_V2_Return_h
++
++#include <sys/cdefs.h>
++__BEGIN_DECLS
++
++/* Default to __single indexable pointers for Firebloom */
++__ptrcheck_abi_assume_single();
++
++/* Need this to be able to include the private header files */
++#ifndef CORE_ENTITLEMENTS_I_KNOW_WHAT_IM_DOING
++#define CORE_ENTITLEMENTS_I_KNOW_WHAT_IM_DOING 1
++#endif
++
++#include <stdint.h>
++#include <string.h>
++#include <os/overflow.h>
++#include <libDER/asn1Types.h>
++#include <libDER/DER_Decode.h>
++#include <libDER/libDER.h>
++#include <CoreEntitlements/CoreEntitlements.h>
++#include <CoreEntitlements/CoreEntitlementsPriv.h>
++
++typedef enum __attribute__((enum_extensibility(closed))) : uint16_t {
++    kCEReturnSuccess = 0x0000,
++    kCEReturnError = 0x0001,
++    kCEReturnStackProtector = 0x0002,
++    kCEReturnOverflow = 0x0003,
++    kCEReturnDuplicateKey = 0x0004,
++    kCEReturnNotPermitted = 0x0005,
++    kCEReturnNotSupported = 0x0006,
++    kCEReturnNotFound = 0x0007,
++    kCEReturnMismatch = 0x0008,
++    kCEReturnMismatchType = 0x0009,
++    kCEReturnInvalidOperation = 0x000A,
++    kCEReturnInvalidArgument = 0x000B,
++    kCEReturnInvalidElement = 0x000C,
++    kCEReturnEmptyElement = 0x000D,
++    kCEReturnOutOfMemory = 0x000E,
++    kCEReturnNoAcceleration = 0x000F,
++    kCEReturnUserDefined = 0x0010,
++    kCEReturnPotentialMemoryLeak = 0x0011,
++    kCEReturnAccelerationIneligible = 0x0012,
++
++    /* Return codes for element constraints */
++    kCEReturnBooleanNotPermitted = 0x00A0,
++    kCEReturnIntegerNotPermitted = 0x00A1,
++    kCEReturnStringNotPermitted = 0x00A2,
++    kCEReturnArrayNotPermitted = 0x00A3,
++    kCEReturnDictionaryNotPermitted = 0x00A4,
++    kCEReturnDataNotPermitted = 0x00A5,
++    kCEReturnUTCTimeNotPermitted = 0x00A6,
++    kCEReturnNumericStringNotPermitted = 0x00A7,
++    kCEReturnApplicationNotPermitted = 0x00A8,
++
++    /* Return codes for policy constraints */
++    kCEReturnMultiTypeArrayNotPermitted = 0x00B0,
++
++    /* Return codes for specification errors */
++    kCEReturnSpecInvalid = 0x00C0,
++    kCEReturnSpecElementTag = 0x00C1,
++    kCEReturnSpecBooleanTag = 0x00C2,
++    kCEReturnSpecBooleanInvalid = 0x00C3,
++    kCEReturnSpecIntegerTag = 0x00C4,
++    kCEReturnSpecIntegerInvalid = 0x00C5,
++    kCEReturnSpecStringTag = 0x00C6,
++    kCEReturnSpecStringEmpty = 0x00C7,
++    kCEReturnSpecStringInvalid = 0x00C8,
++    kCEReturnSpecDataTag = 0x00C9,
++    kCEReturnSpecDataEmpty = 0x00CA,
++    kCEReturnSpecArrayTag = 0x00CB,
++    kCEReturnSpecArrayEmpty = 0x00CC,
++    kCEReturnSpecArrayInvalid = 0x00CD,
++    kCEReturnSpecDictionaryTag = 0x00CE,
++    kCEReturnSpecDictionaryEmpty = 0x00CF,
++    kCEReturnSpecDictionaryUnsorted = 0x00D0,
++    kCEReturnSpecDictionaryInvalid = 0x00D1,
++    kCEReturnSpecKeyValuePairTag = 0x00D2,
++    kCEReturnSpecKeyValuePairInvalid = 0x00D3,
++    kCEReturnSpecKeyValuePairKey = 0x00D4,
++    kCEReturnSpecKeyValuePairValue = 0x00D5,
++    kCEReturnSpecApplicationTag = 0x00D6,
++    kCEReturnSpecApplicationFormat = 0x00D7,
++    kCEReturnSpecApplicationNotSupported = 0x00D8,
++
++    /*
++     * Return codes mapped into the V2 implementation from CoreEntitlements_V2.
++     */
++    kCEReturnV1APIMisuse = 0xFF00,
++    kCEReturnV1InvalidArgument = 0xFF01,
++    kCEReturnV1AllocationFailed = 0xFF02,
++    kCEReturnV1MalformedEntitlements = 0xFF03,
++    kCEReturnV1QueryCannotBeSatisfied = 0xFF04,
++    kCEReturnV1NotEligibleForAcceleration = 0xFF05,
++    kCEReturnV1Error = 0xFF06,
++
++    /*
++     * Return codes mapped into the V2 implementation from libDER.
++     */
++    kCEReturnDEREndOfSequence = 0xFF10,
++    kCEReturnDERUnexpectedTag = 0xFF11,
++    kCEReturnDERDecodeError = 0xFF12,
++    kCEReturnDERNotImplemented = 0xFF13,
++    kCEReturnDERIncompleteSequence = 0xFF14,
++    kCEReturnDERParameterError = 0xFF15,
++    kCEReturnDERBufferOverflow = 0xFF16,
++    kCEReturnDERError = 0xFF17
++} CEReturn_t;
++
++__END_DECLS
++#endif /* CoreEntitlements_V2_Return_h */
+diff --git a/EXTERNAL_HEADERS/CoreEntitlements/V2/StackProtector.h b/EXTERNAL_HEADERS/CoreEntitlements/V2/StackProtector.h
+new file mode 100644
+index 00000000..894cd562
+--- /dev/null
++++ b/EXTERNAL_HEADERS/CoreEntitlements/V2/StackProtector.h
+@@ -0,0 +1,43 @@
++#ifndef CoreEntitlements_V2_StackProtector_h
++#define CoreEntitlements_V2_StackProtector_h
++
++#include <sys/cdefs.h>
++__BEGIN_DECLS
++
++/* Default to __single indexable pointers for Firebloom */
++__ptrcheck_abi_assume_single();
++
++#include <stdint.h>
++#include <CoreEntitlements/V2/Return.h>
++
++/* Stack protector not required by default */
++#ifndef libCoreEntitlements_Config_StackProtector
++#define libCoreEntitlements_Config_StackProtector 0
++#endif
++
++#if libCoreEntitlements_Config_StackProtector
++
++/**
++ * The environment defined `CEEnvironmentStackCheck` function is called before the
++ * library begins iterating into a nested type such as an array or a dictionary. This
++ * provides the environment an opportunity to catch stack overflows, and instead
++ * return safely.
++ *
++ * A return of `kCEReturnSuccess` means the library is safe to proceed with the
++ * iteration, and a return of any other value halts the iteration and returns an error.
++ */
++extern CEReturn_t
++CEEnvironmentStackCheck(void);
++
++#else
++
++static inline __attribute__((always_inline)) CEReturn_t
++CEEnvironmentStackCheck(void)
++{
++    return kCEReturnSuccess;
++}
++
++#endif /* libCoreEntitlements_Config_StackProtector */
++
++__END_DECLS
++#endif /* CoreEntitlements_V2_StackProtector_h */
+diff --git a/EXTERNAL_HEADERS/TargetConditionals.h b/EXTERNAL_HEADERS/TargetConditionals.h
+new file mode 100644
+index 00000000..6f15f18d
+--- /dev/null
++++ b/EXTERNAL_HEADERS/TargetConditionals.h
+@@ -0,0 +1,525 @@
++/*
++ * Copyright (c) 2000-2014 by Apple Inc.. All rights reserved.
++ *
++ * @APPLE_LICENSE_HEADER_START@
++ * 
++ * This file contains Original Code and/or Modifications of Original Code
++ * as defined in and that are subject to the Apple Public Source License
++ * Version 2.0 (the 'License'). You may not use this file except in
++ * compliance with the License. Please obtain a copy of the License at
++ * http://www.opensource.apple.com/apsl/ and read it before using this
++ * file.
++ * 
++ * The Original Code and all software distributed under the License are
++ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
++ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
++ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
++ * Please see the License for the specific language governing rights and
++ * limitations under the License.
++ * 
++ * @APPLE_LICENSE_HEADER_END@
++ */
++ 
++/*
++     File:       TargetConditionals.h
++ 
++     Contains:   Autoconfiguration of TARGET_ conditionals for Mac OS X and iPhone
++     
++                 Note:  TargetConditionals.h in 3.4 Universal Interfaces works
++                        with all compilers.  This header only recognizes compilers
++                        known to run on Mac OS X.
++  
++*/
++
++#ifndef __TARGETCONDITIONALS__
++#define __TARGETCONDITIONALS__
++
++/*
++ *
++ *  TARGET_CPU_*
++ *  These conditionals specify which microprocessor instruction set is being
++ *  generated.  At most one of these is true, the rest are false.
++ *
++ *      TARGET_CPU_PPC          - Compiler is generating PowerPC instructions for 32-bit mode
++ *      TARGET_CPU_PPC64        - Compiler is generating PowerPC instructions for 64-bit mode
++ *      TARGET_CPU_68K          - Compiler is generating 680x0 instructions
++ *      TARGET_CPU_X86          - Compiler is generating x86 instructions for 32-bit mode
++ *      TARGET_CPU_X86_64       - Compiler is generating x86 instructions for 64-bit mode
++ *      TARGET_CPU_ARM          - Compiler is generating ARM instructions for 32-bit mode
++ *      TARGET_CPU_ARM64        - Compiler is generating ARM instructions for 64-bit mode
++ *      TARGET_CPU_MIPS         - Compiler is generating MIPS instructions
++ *      TARGET_CPU_SPARC        - Compiler is generating Sparc instructions
++ *      TARGET_CPU_ALPHA        - Compiler is generating Dec Alpha instructions
++ */
++
++
++
++/*
++ *  TARGET_OS_*
++ *
++ *  These conditionals specify in which Operating System the generated code will
++ *  run.  Indention is used to show which conditionals are evolutionary subclasses.
++ *
++ *  The MAC/WIN32/UNIX conditionals are mutually exclusive.
++ *  The IOS/TV/WATCH/VISION conditionals are mutually exclusive.
++ *
++ *    TARGET_OS_WIN32              - Generated code will run on WIN32 API
++ *    TARGET_OS_WINDOWS            - Generated code will run on Windows
++ *    TARGET_OS_UNIX               - Generated code will run on some Unix (not macOS)
++ *    TARGET_OS_LINUX              - Generated code will run on Linux
++ *    TARGET_OS_MAC                - Generated code will run on a variant of macOS
++ *      TARGET_OS_OSX                - Generated code will run on macOS
++ *      TARGET_OS_IPHONE             - Generated code will run on a variant of iOS (firmware, devices, simulator)
++ *        TARGET_OS_IOS                - Generated code will run on iOS
++ *          TARGET_OS_MACCATALYST        - Generated code will run on macOS
++ *        TARGET_OS_TV                 - Generated code will run on tvOS
++ *        TARGET_OS_WATCH              - Generated code will run on watchOS
++ *        TARGET_OS_VISION             - Generated code will run on visionOS
++ *        TARGET_OS_BRIDGE             - Generated code will run on bridge devices
++ *      TARGET_OS_SIMULATOR          - Generated code will run on an iOS, tvOS, watchOS, or visionOS simulator
++ *      TARGET_OS_DRIVERKIT          - Generated code will run on macOS, iOS, tvOS, watchOS, or visionOS
++ *
++ *    TARGET_OS_EMBEDDED           - DEPRECATED: Use TARGET_OS_IPHONE and/or TARGET_OS_SIMULATOR instead
++ *    TARGET_IPHONE_SIMULATOR      - DEPRECATED: Same as TARGET_OS_SIMULATOR
++ *    TARGET_OS_NANO               - DEPRECATED: Same as TARGET_OS_WATCH
++ *
++ *    +--------------------------------------------------------------------------------------+
++ *    |                                    TARGET_OS_MAC                                     |
++ *    | +-----+ +------------------------------------------------------------+ +-----------+ |
++ *    | |     | |                  TARGET_OS_IPHONE                          | |           | |
++ *    | |     | | +-----------------+ +----+ +-------+ +--------+ +--------+ | |           | |
++ *    | |     | | |       IOS       | |    | |       | |        | |        | | |           | |
++ *    | | OSX | | | +-------------+ | | TV | | WATCH | | BRIDGE | | VISION | | | DRIVERKIT | |
++ *    | |     | | | | MACCATALYST | | |    | |       | |        | |        | | |           | |
++ *    | |     | | | +-------------+ | |    | |       | |        | |        | | |           | |
++ *    | |     | | +-----------------+ +----+ +-------+ +--------+ +--------+ | |           | |
++ *    | +-----+ +------------------------------------------------------------+ +-----------+ |
++ *    +--------------------------------------------------------------------------------------+
++ */
++
++/*
++ *  TARGET_RT_*
++ *
++ *  These conditionals specify in which runtime the generated code will
++ *  run. This is needed when the OS and CPU support more than one runtime
++ *  (e.g. Mac OS X supports CFM and mach-o).
++ *
++ *      TARGET_RT_LITTLE_ENDIAN - Generated code uses little endian format for integers
++ *      TARGET_RT_BIG_ENDIAN    - Generated code uses big endian format for integers
++ *      TARGET_RT_64_BIT        - Generated code uses 64-bit pointers
++ *      TARGET_RT_MAC_CFM       - TARGET_OS_MAC is true and CFM68K or PowerPC CFM (TVectors) are used
++ *      TARGET_RT_MAC_MACHO     - TARGET_OS_MAC is true and Mach-O/dlyd runtime is used
++ */
++ 
++/*
++ * TARGET_OS conditionals can be enabled via clang preprocessor extensions:
++ *
++ *      __is_target_arch
++ *      __is_target_vendor
++ *      __is_target_os
++ *      __is_target_environment
++ *
++ *  "-target=x86_64-apple-ios12-macabi"
++ *      TARGET_OS_MAC=1
++ *      TARGET_OS_IPHONE=1
++ *      TARGET_OS_IOS=1
++ *      TARGET_OS_MACCATALYST=1
++ *
++ *  "-target=x86_64-apple-ios12-simulator"
++ *      TARGET_OS_MAC=1
++ *      TARGET_OS_IPHONE=1
++ *      TARGET_OS_IOS=1
++ *      TARGET_OS_SIMULATOR=1
++ *
++ * DYNAMIC_TARGETS_ENABLED indicates that the core TARGET_OS macros were enabled via clang preprocessor extensions.
++ * If this value is not set, the macro enablements will fall back to the static behavior.
++ * It is disabled by default.
++ */
++
++
++#if defined(__is_target_environment) && defined(__has_extension) 
++  #if __is_target_environment(kernelkit) && !__has_extension(define_target_os_macros)
++    #error KernelKit requires `-fdefine_target_os_macros`
++  #endif
++#endif
++
++#if !defined(__has_extension) || !__has_extension(define_target_os_macros)
++#if defined(__has_builtin)
++ #if __has_builtin(__is_target_arch)
++  #if __has_builtin(__is_target_vendor)
++   #if __has_builtin(__is_target_os)
++    #if __has_builtin(__is_target_environment)
++
++    /* "-target=x86_64-apple-ios12-macabi" */
++    /* "-target=arm64-apple-ios12-macabi" */
++    /* "-target=arm64e-apple-ios12-macabi" */
++    #if (__is_target_arch(x86_64) || __arm64__) && __is_target_vendor(apple) && __is_target_os(ios) && __is_target_environment(macabi)
++        #define TARGET_OS_MAC               1
++        #define TARGET_OS_IPHONE            1
++        #define TARGET_OS_IOS               1
++        #define TARGET_OS_MACCATALYST       1
++        #define TARGET_OS_MACCATALYST            1
++        #ifndef TARGET_OS_UIKITFORMAC
++         #define TARGET_OS_UIKITFORMAC      1
++        #endif
++    #define TARGET_OS_UNIX                  0
++    #define DYNAMIC_TARGETS_ENABLED         1
++    #endif 
++
++    /* "-target=x86_64-apple-ios12-simulator" */
++    /* "-target=arm64-apple-ios12-simulator" */
++    /* "-target=arm64e-apple-ios12-simulator" */
++    #if (__is_target_arch(x86_64) || __arm64__) && __is_target_vendor(apple) && __is_target_os(ios) && __is_target_environment(simulator)
++        #define TARGET_OS_MAC               1
++        #define TARGET_OS_IPHONE            1
++        #define TARGET_OS_IOS               1
++        #define TARGET_OS_SIMULATOR         1
++        #define TARGET_OS_UNIX              0
++        #define DYNAMIC_TARGETS_ENABLED     1
++    #endif 
++
++
++
++    /* "-target=arm64e-apple-xros1.0[-simulator]" */
++    #if __is_target_vendor(apple) && __is_target_os(xros) && (!__is_target_environment(exclavekit) && !__is_target_environment(exclavecore))
++        #define TARGET_OS_MAC               1
++        #define TARGET_OS_IPHONE            1
++
++        #if __is_target_environment(simulator)
++          #define TARGET_OS_SIMULATOR        1
++        #else
++          #define TARGET_OS_EMBEDDED        1
++        #endif
++        #define TARGET_OS_VISION            1
++        #define TARGET_OS_UNIX              0
++        #define DYNAMIC_TARGETS_ENABLED     1
++    #endif
++
++    
++    #if (__is_target_vendor(apple) && __is_target_environment(exclavecore))
++        
++        #define TARGET_OS_UNIX              0
++        #define DYNAMIC_TARGETS_ENABLED     1
++    #endif
++
++    
++    #if (__is_target_vendor(apple) && __is_target_environment(exclavekit))
++        #define TARGET_OS_MAC               1
++        
++        #define TARGET_OS_UNIX              0
++        #define DYNAMIC_TARGETS_ENABLED     1
++    #endif
++
++    /* "-target=x86_64-apple-driverkit19.0" */
++    /* "-target=arm64-apple-driverkit19.0" */
++    /* "-target=arm64e-apple-driverkit19.0" */
++    #if __is_target_vendor(apple) && __is_target_os(driverkit)
++        #define TARGET_OS_MAC               1
++        #define TARGET_OS_DRIVERKIT         1
++        #define TARGET_OS_UNIX              0
++        #define DYNAMIC_TARGETS_ENABLED     1
++    #endif
++
++    #endif /* #if __has_builtin(__is_target_environment) */
++   #endif /* #if __has_builtin(__is_target_os) */
++  #endif /* #if __has_builtin(__is_target_vendor) */
++ #endif /* #if __has_builtin(__is_target_arch) */
++#endif /* #if defined(__has_builtin) */
++
++#ifndef DYNAMIC_TARGETS_ENABLED
++     #define DYNAMIC_TARGETS_ENABLED   0
++#endif /* DYNAMIC_TARGETS_ENABLED */
++
++/*
++ *    gcc based compiler used on Mac OS X
++ */
++#if defined(__GNUC__) && ( defined(__APPLE_CPP__) || defined(__APPLE_CC__) || defined(__MACOS_CLASSIC__) )
++    #if !DYNAMIC_TARGETS_ENABLED
++        #define TARGET_OS_MAC               1
++        #define TARGET_OS_OSX               1
++        #define TARGET_OS_IPHONE            0
++
++        #define TARGET_OS_IOS               0
++
++        #define TARGET_OS_WATCH             0
++        
++        #define TARGET_OS_TV                0
++        #define TARGET_OS_MACCATALYST       0
++        #define TARGET_OS_MACCATALYST            0
++        #ifndef TARGET_OS_UIKITFORMAC
++         #define TARGET_OS_UIKITFORMAC      0
++        #endif
++        #define TARGET_OS_SIMULATOR         0
++        #define TARGET_OS_EMBEDDED          0 
++        #define TARGET_OS_UNIX              0
++    #endif
++
++/*
++ *   CodeWarrior compiler from Metrowerks/Motorola
++ */
++#elif defined(__MWERKS__)
++    #define TARGET_OS_MAC               1
++
++/*
++ *   unknown compiler
++ */
++#else
++    #define TARGET_OS_MAC                1
++#endif
++#endif /* !defined(__has_extension) || !__has_extension(define_target_os_macros) */
++
++// This has to always be defined in the header due to limitations in define_target_os_macros
++#define TARGET_OS_RTKIT             0
++
++/*
++ *    gcc based compiler used on Mac OS X
++ */
++#if defined(__GNUC__) && ( defined(__APPLE_CPP__) || defined(__APPLE_CC__) || defined(__MACOS_CLASSIC__) )
++    #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
++        #define TARGET_RT_LITTLE_ENDIAN 1
++        #define TARGET_RT_BIG_ENDIAN    0
++    #else
++        #define TARGET_RT_LITTLE_ENDIAN 0
++        #define TARGET_RT_BIG_ENDIAN    1
++    #endif
++    #if __LP64__
++        #define TARGET_RT_64_BIT        1
++    #else
++        #define TARGET_RT_64_BIT        0
++    #endif
++    #if defined(__ppc__) && __MACOS_CLASSIC__
++        #define TARGET_RT_MAC_CFM       1
++        #define TARGET_RT_MAC_MACHO     0
++    #else
++        #define TARGET_RT_MAC_CFM       0
++        #define TARGET_RT_MAC_MACHO     1
++    #endif
++
++/*
++ *   CodeWarrior compiler from Metrowerks/Motorola
++ */
++#elif defined(__MWERKS__)
++    #if defined(__POWERPC__)
++        #define TARGET_RT_LITTLE_ENDIAN 0
++        #define TARGET_RT_BIG_ENDIAN    1
++    #elif defined(__INTEL__)
++        #define TARGET_RT_LITTLE_ENDIAN 1
++        #define TARGET_RT_BIG_ENDIAN    0
++    #else
++        #error unknown Metrowerks CPU type
++    #endif
++    #define TARGET_RT_64_BIT            0
++    #ifdef __MACH__
++        #define TARGET_RT_MAC_CFM       0
++        #define TARGET_RT_MAC_MACHO     1
++    #else
++        #define TARGET_RT_MAC_CFM       1
++        #define TARGET_RT_MAC_MACHO     0
++    #endif
++
++/*
++ *   unknown compiler
++ */
++#else
++    #if TARGET_CPU_PPC || TARGET_CPU_PPC64
++        #define TARGET_RT_BIG_ENDIAN     1
++        #define TARGET_RT_LITTLE_ENDIAN  0
++    #else
++        #define TARGET_RT_BIG_ENDIAN     0
++        #define TARGET_RT_LITTLE_ENDIAN  1
++    #endif
++    #if TARGET_CPU_PPC64 || TARGET_CPU_X86_64
++        #define TARGET_RT_64_BIT         1
++    #else
++        #define TARGET_RT_64_BIT         0
++    #endif
++    #ifdef __MACH__
++        #define TARGET_RT_MAC_MACHO      1
++        #define TARGET_RT_MAC_CFM        0
++    #else
++        #define TARGET_RT_MAC_MACHO      0
++        #define TARGET_RT_MAC_CFM        1
++    #endif
++#endif
++
++/*
++ *   GCC and clang
++ */
++#if defined(__GNUC__) && ( defined(__APPLE_CPP__) || defined(__APPLE_CC__) || defined(__MACOS_CLASSIC__) )
++    #if defined(__ppc__)
++        #define TARGET_CPU_PPC          1
++    #elif defined(__ppc64__)
++        #define TARGET_CPU_PPC64        1
++    #elif defined(__i386__)
++        #define TARGET_CPU_X86          1
++    #elif defined(__x86_64__)
++        #define TARGET_CPU_X86_64       1
++    #elif defined(__arm__)
++        #define TARGET_CPU_ARM          1
++    #elif defined(__arm64__)
++        #define TARGET_CPU_ARM64        1
++    #else
++
++            #error unrecognized GNU C compiler
++
++    #endif
++
++/*
++ *   CodeWarrior compiler from Metrowerks/Motorola
++ */
++#elif defined(__MWERKS__)
++    #if defined(__POWERPC__)
++        #define TARGET_CPU_PPC          1
++    #elif defined(__INTEL__)
++        #define TARGET_CPU_X86          1
++    #else
++        #error unknown Metrowerks CPU type
++    #endif
++
++/*
++ *   unknown compiler
++ */
++#else
++    #if !defined(TARGET_CPU_PPC) && !defined(TARGET_CPU_PPC64)      \
++        && !defined(TARGET_CPU_X86) && !defined(TARGET_CPU_X86_64)  \
++        && !defined(TARGET_CPU_ARM) && !defined(TARGET_CPU_ARM64)
++        /*
++            TargetConditionals.h is designed to be plug-and-play.  It auto detects
++            which compiler is being run and configures the TARGET_ conditionals
++            appropriately.
++
++            The short term work around is to set the TARGET_CPU_ and TARGET_OS_
++            on the command line to the compiler (e.g. -DTARGET_CPU_MIPS=1 -DTARGET_OS_UNIX=1)
++
++            The long term solution is to add suppport for __is_target_arch and __is_target_os
++            to your compiler.
++        */
++        #error TargetConditionals.h: unknown compiler (see comment above)
++    #endif
++#endif
++
++
++
++// Make sure all TARGET_OS_* and TARGET_CPU_* values are defined
++#ifndef TARGET_OS_MAC
++    #define TARGET_OS_MAC        0
++#endif
++
++#ifndef TARGET_OS_OSX
++    #define TARGET_OS_OSX        0
++#endif
++
++#ifndef TARGET_OS_IPHONE
++    #define TARGET_OS_IPHONE     0
++#endif
++
++#ifndef TARGET_OS_IOS
++    #define TARGET_OS_IOS        0
++#endif
++
++#ifndef TARGET_OS_WATCH
++    #define TARGET_OS_WATCH      0
++#endif
++
++#ifndef TARGET_OS_TV
++    #define TARGET_OS_TV         0
++#endif
++
++#ifndef TARGET_OS_SIMULATOR
++    #define TARGET_OS_SIMULATOR  0
++#endif
++
++#ifndef TARGET_OS_EMBEDDED
++    #define TARGET_OS_EMBEDDED   0
++#endif
++
++#ifndef TARGET_OS_RTKIT
++    #define TARGET_OS_RTKIT      0
++#endif
++
++#ifndef TARGET_OS_MACCATALYST
++    #define TARGET_OS_MACCATALYST 0
++#endif
++
++#ifndef TARGET_OS_VISION
++    #define TARGET_OS_VISION     0
++#endif
++
++#ifndef TARGET_OS_UIKITFORMAC
++    #define TARGET_OS_UIKITFORMAC 0
++#endif
++
++#ifndef TARGET_OS_DRIVERKIT
++    #define TARGET_OS_DRIVERKIT 0
++#endif 
++
++#ifndef TARGET_OS_WIN32
++    #define TARGET_OS_WIN32     0
++#endif
++
++#ifndef TARGET_OS_WINDOWS
++    #define TARGET_OS_WINDOWS   0
++#endif
++
++
++
++#ifndef TARGET_OS_LINUX
++    #define TARGET_OS_LINUX     0
++#endif
++
++#ifndef TARGET_CPU_PPC
++    #define TARGET_CPU_PPC      0
++#endif
++
++#ifndef TARGET_CPU_PPC64
++    #define TARGET_CPU_PPC64    0
++#endif
++
++#ifndef TARGET_CPU_68K
++    #define TARGET_CPU_68K      0
++#endif
++
++#ifndef TARGET_CPU_X86
++    #define TARGET_CPU_X86      0
++#endif
++
++#ifndef TARGET_CPU_X86_64
++    #define TARGET_CPU_X86_64   0
++#endif
++
++#ifndef TARGET_CPU_ARM
++    #define TARGET_CPU_ARM      0
++#endif
++
++#ifndef TARGET_CPU_ARM64
++    #define TARGET_CPU_ARM64    0
++#endif
++
++#ifndef TARGET_CPU_MIPS
++    #define TARGET_CPU_MIPS     0
++#endif
++
++#ifndef TARGET_CPU_SPARC
++    #define TARGET_CPU_SPARC    0
++#endif
++
++#ifndef TARGET_CPU_ALPHA
++    #define TARGET_CPU_ALPHA    0
++#endif
++
++#ifndef TARGET_ABI_USES_IOS_VALUES
++    #define TARGET_ABI_USES_IOS_VALUES  (!TARGET_CPU_X86_64 || (TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST))
++#endif
++
++#ifndef TARGET_IPHONE_SIMULATOR
++    #define TARGET_IPHONE_SIMULATOR     TARGET_OS_SIMULATOR /* deprecated */
++#endif
++
++#ifndef TARGET_OS_NANO
++    #define TARGET_OS_NANO              TARGET_OS_WATCH /* deprecated */
++#endif
++
++
++
++#endif  /* __TARGETCONDITIONALS__ */
+diff --git a/EXTERNAL_HEADERS/TrustCache/API.h b/EXTERNAL_HEADERS/TrustCache/API.h
+new file mode 100644
+index 00000000..d13cddf3
+--- /dev/null
++++ b/EXTERNAL_HEADERS/TrustCache/API.h
+@@ -0,0 +1,188 @@
++#ifndef libTrustCache_API_h
++#define libTrustCache_API_h
++
++#include <sys/cdefs.h>
++__BEGIN_DECLS
++
++#include <stdint.h>
++#include <stdbool.h>
++#include <img4/firmware.h>
++#include <TrustCache/RawTypes.h>
++#include <TrustCache/Types.h>
++#include <TrustCache/TypesConfig.h>
++#include <TrustCache/Return.h>
++
++/**
++ * NOTE: This library does not enforce any concurrency by itself. To be safe in a multi-threaded
++ * environment, the caller must manually enforce concurrency on the runtime data structure as
++ * otherwise the library is susceptible to memory corruption from race conditions.
++ */
++
++/**
++ * Initialize a runtime to the default values.
++ *
++ * If the system supports read-only segments, and the runtime is allocated within the read-only
++ * segment, then this function needs to be called before the segment is enforced to be read-only.
++ * For more information, please look at <TrustCache/Types.h>.
++ */
++static inline void
++trustCacheInitializeRuntime(TrustCacheRuntime_t *runtime,
++                            TrustCacheMutableRuntime_t *mutableRT,
++                            bool allowSecondStaticTC,
++                            bool allowEngineeringTC,
++                            bool allowLegacyTC,
++                            const img4_runtime_t *image4RT)
++{
++    /* Zero out everything */
++    memset(runtime, 0, sizeof(*runtime));
++    memset(mutableRT, 0, sizeof(*mutableRT));
++
++    /* Set the mutable runtime pointer */
++    runtime->mutableRT = mutableRT;
++
++    /* Setup trust cache type permissions */
++    runtime->allowSecondStaticTC = allowSecondStaticTC;
++    runtime->allowEngineeringTC = allowEngineeringTC;
++    runtime->allowLegacyTC = allowLegacyTC;
++
++    /* Set the image4 runtime */
++    runtime->image4RT = image4RT;
++}
++
++/**
++ * Construct a trust cache object from some module bytes. The module is validated for
++ * correctness before being returned.
++ */
++TCReturn_t
++trustCacheConstructInvalid(TrustCache_t *trustCache,
++                           const uint8_t *moduleAddr,
++                           size_t moduleSize);
++
++/**
++ * Check the runtime for a trust cache which matches a particular UUID. Since we do
++ * not allow trust caches with duplocate UUIDs, there can only ever be a single trust
++ * cache with a particular UUID within the runtime.
++ */
++TCReturn_t
++trustCacheCheckRuntimeForUUID(const TrustCacheRuntime_t *runtime,
++                              const uint8_t checkUUID[kUUIDSize],
++                              const TrustCache_t **trustCacheRet);
++
++/**
++ * Add a trust cache module directly to the runtime. This function is used to add modules which
++ * don't need to be separately authenticated. Currently, the only trust cache types which can be
++ * used with this function are static and engineering trust caches.
++ *
++ * If the system supports read-only segments, and the runtime is allocated within the read-only
++ * segment, then this function needs to be called before the segment is enforced to be read-only.
++ * For more information, please look at <TrustCache/Types.h>.
++ */
++TCReturn_t
++trustCacheLoadModule(TrustCacheRuntime_t *runtime,
++                     const TCType_t type,
++                     TrustCache_t *trustCache,
++                     const uintptr_t dataAddr,
++                     const size_t dataSize);
++
++/**
++ * Load a trust cache onto the system. This function validates the trust cache for a proper
++ * signature and adds it to the runtime.
++ *
++ * Both the payload and the manifest must be provided and they will be validated as image4
++ * objects.
++ */
++TCReturn_t
++trustCacheLoad(TrustCacheRuntime_t *runtime,
++               TCType_t type,
++               TrustCache_t *trustCache,
++               const uintptr_t payloadAddr,
++               const size_t payloadSize,
++               const uintptr_t manifestAddr,
++               const size_t manifestSize);
++
++/**
++ * Extract an image4 artifact from an image4 file or an image4 payload and extract the
++ * trust cache module embedded within it. The module is validated for correctness
++ * before being returned, however the image4 signature is not verified.
++ *
++ * The returned trust cache object is marked with an invalid type.
++ */
++TCReturn_t
++trustCacheExtractModule(TrustCache_t *trustCache,
++                        const uint8_t *dataAddr,
++                        size_t dataSize);
++
++/**
++ * Query a  trust cache for a particular CDHash. The returned token can then be used to
++ * query further attributes from the matched entry.
++ */
++TCReturn_t
++trustCacheQuery(const TrustCacheRuntime_t *runtime,
++                TCQueryType_t queryType,
++                const uint8_t CDHash[kTCEntryHashSize],
++                TrustCacheQueryToken_t *queryToken);
++
++/**
++ * Get the module bytes backng a trust cache object. The environment may have chosen
++ * to allocate the module bytes within read-only memory, so the bytes returned may
++ * not be mutable.
++ */
++TCReturn_t
++trustCacheGetModule(const TrustCache_t *trustCache,
++                    const uint8_t **moduleAddrRet,
++                    size_t *moduleSizeRet);
++
++/**
++ * Get the UUID of the trust cache module represented by the wrapped trust cache object.
++ */
++TCReturn_t
++trustCacheGetUUID(const TrustCache_t *trustCache,
++                  uint8_t returnUUID[kUUIDSize]);
++
++/**
++ * Get the capabilities of a trust cache. This function can be used to query which fields a given
++ * trust cache supports.
++ *
++ * The fields which are supported are based on the version of the trust cache module.
++ */
++TCReturn_t
++trustCacheGetCapabilities(const TrustCache_t *trustCache,
++                          TCCapabilities_t *capabilities);
++
++/**
++ * Acquire the trust cache type for a query token.
++ */
++TCReturn_t
++trustCacheQueryGetTCType(const TrustCacheQueryToken_t *queryToken,
++                         TCType_t *typeRet);
++
++/**
++ * Acquire the capabilities of the trust cache through a query token.
++ */
++TCReturn_t
++trustCacheQueryGetCapabilities(const TrustCacheQueryToken_t *queryToken,
++                               TCCapabilities_t *capabilities);
++
++/**
++ * Acquire the hash type for the CDHash through a query token.
++ */
++TCReturn_t
++trustCacheQueryGetHashType(const TrustCacheQueryToken_t *queryToken,
++                           uint8_t *hashTypeRet);
++
++/**
++ * Acquire the flags for a trust cache entry through a query token.
++ */
++TCReturn_t
++trustCacheQueryGetFlags(const TrustCacheQueryToken_t *queryToken,
++                        uint64_t *flagsRet);
++
++/**
++ * Acquire the constraint category for a trust cache entry through a query token.
++ */
++TCReturn_t
++trustCacheQueryGetConstraintCategory(const TrustCacheQueryToken_t *queryToken,
++                                     uint8_t *constraintCategoryRet);
++
++__END_DECLS
++#endif /* libTrustCache_API_h */
+diff --git a/EXTERNAL_HEADERS/TrustCache/RawTypes.h b/EXTERNAL_HEADERS/TrustCache/RawTypes.h
+new file mode 100644
+index 00000000..16b684e2
+--- /dev/null
++++ b/EXTERNAL_HEADERS/TrustCache/RawTypes.h
+@@ -0,0 +1,103 @@
++#ifndef libTrustCache_RawTypes_h
++#define libTrustCache_RawTypes_h
++
++#include <sys/cdefs.h>
++__BEGIN_DECLS
++
++#include <stdint.h>
++#include <corecrypto/ccsha1.h>
++
++/*
++ * CDHashes in the trust cache are always truncated to the length of a SHA1 hash.
++ */
++#define kTCEntryHashSize CCSHA1_OUTPUT_SIZE
++
++/* UUIDs are always 16 bytes */
++#define kUUIDSize 16
++
++/* Versions supported by the library */
++enum {
++    kTCVersion0 = 0x0,
++    kTCVersion1 = 0x1,
++    kTCVersion2 = 0x2,
++
++    kTCVersionTotal,
++};
++
++/* Flags for the trust cache look ups */
++enum {
++    kTCFlagAMFID = 0x01,
++    kTCFlagANEModel = 0x02,
++};
++
++typedef struct _TrustCacheModuleBase {
++    /* The version for this trust cache module */
++    uint32_t version;
++} __attribute__((packed)) TrustCacheModuleBase_t;
++
++#pragma mark Trust Cache Version 0
++
++typedef uint8_t TrustCacheEntry0_t[kTCEntryHashSize];
++
++typedef struct _TrustCacheModule0 {
++    /* Must be 0 */
++    uint32_t version;
++
++    /* ID which uniquely identifies the trust cache */
++    uint8_t uuid[kUUIDSize];
++
++    /* The number of entries present in the trust cache */
++    uint32_t numEntries;
++
++    /* Dynamic data containing all the entries */
++    TrustCacheEntry0_t entries[0];
++} __attribute__((packed)) TrustCacheModule0_t;
++
++#pragma mark Trust Cache Version 1
++
++typedef struct _TrustCacheEntry1 {
++    uint8_t CDHash[kTCEntryHashSize];
++    uint8_t hashType;
++    uint8_t flags;
++} __attribute__((packed)) TrustCacheEntry1_t;
++
++typedef struct _TrustCacheModule1 {
++    /* Must be 1 */
++    uint32_t version;
++
++    /* ID which uniquely identifies the trust cache */
++    uint8_t uuid[kUUIDSize];
++
++    /* The number of entries present in the trust cache */
++    uint32_t numEntries;
++
++    /* Dynamic data containing all the entries */
++    TrustCacheEntry1_t entries[0];
++} __attribute__((packed)) TrustCacheModule1_t;
++
++#pragma mark Trust Cache Version 2
++
++typedef struct _TrustCacheEntry2 {
++    uint8_t CDHash[kTCEntryHashSize];
++    uint8_t hashType;
++    uint8_t flags;
++    uint8_t constraintCategory;
++    uint8_t reserved0;
++} __attribute__((packed)) TrustCacheEntry2_t;
++
++typedef struct _TrustCacheModule2 {
++    /* Must be 2 */
++    uint32_t version;
++
++    /* ID which uniquely identifies the trust cache */
++    uint8_t uuid[kUUIDSize];
++
++    /* The number of entries present in the trust cache */
++    uint32_t numEntries;
++
++    /* Dynamic data containing all the entries */
++    TrustCacheEntry2_t entries[0];
++} __attribute__((packed)) TrustCacheModule2_t;
++
++__END_DECLS
++#endif /* libTrustCache_RawTypes_h */
+diff --git a/EXTERNAL_HEADERS/TrustCache/Return.h b/EXTERNAL_HEADERS/TrustCache/Return.h
+new file mode 100644
+index 00000000..440a53c4
+--- /dev/null
++++ b/EXTERNAL_HEADERS/TrustCache/Return.h
+@@ -0,0 +1,123 @@
++#ifndef libTrustCache_Return_h
++#define libTrustCache_Return_h
++
++#include <sys/cdefs.h>
++__BEGIN_DECLS
++
++#include <stdint.h>
++
++/* Components which can return information from the library */
++enum {
++    kTCComponentLoadModule = 0x00,
++    kTCComponentLoad = 0x01,
++    kTCComponentImage4Validate = 0x02,
++    kTCComponentImage4Callback = 0x03,
++    kTCComponentConstructInvalid = 0x04,
++    kTCComponentCheckRuntimeForUUID = 0x05,
++    kTCComponentExtractModule = 0x06,
++    kTCComponentGetUUID = 0x07,
++    kTCComponentGetModule = 0x08,
++
++    /* Query Functions */
++    kTCComponentQuery = 0x10,
++    kTCComponentQueryChain = 0x11,
++    kTCComponentQueryRuntime = 0x12,
++    kTCComponentQueryTCType = 0x13,
++    kTCComponentQueryHashType = 0x14,
++    kTCComponentQueryFlags = 0x15,
++    kTCComponentQueryConstraintCategory = 0x16,
++
++    /* Module based */
++    kTCComponentQueryModule = 0x40,
++    kTCComponentValidateModule = 0x41,
++    kTCComponentQueryModule0 = 0x42,
++    kTCComponentValidateModule0 = 0x43,
++    kTCComponentQueryModule1 = 0x44,
++    kTCComponentValidateModule1 = 0x45,
++    kTCComponentQueryModule2 = 0x46,
++    kTCComponentValidateModule2 = 0x47,
++    kTCComponentModuleCapabilities = 0x48,
++
++    /* Other functions which can return a value */
++    kTCComponentLinkedListAddHead = 0x80,
++    kTCComponentLinkedListRemove = 0x81,
++    kTCComponentExtractImage4Payload = 0x82,
++
++    /* Cannot exceed this value */
++    kTCComponentTotal = 0xFF,
++};
++
++/* Error types which can be returned from the library */
++enum {
++    kTCReturnSuccess = 0x00,
++
++    /* Generic error condition - avoid using this */
++    kTCReturnError = 0x01,
++
++    /* Specific error conditions */
++    kTCReturnOverflow = 0x20,
++    kTCReturnUnsupported = 0x21,
++    kTCReturnInvalidModule = 0x22,
++    kTCReturnDuplicate = 0x23,
++    kTCReturnNotFound = 0x24,
++    kTCReturnInvalidArguments = 0x25,
++    kTCReturnInsufficientLength = 0x26,
++    kTCReturnNotPermitted = 0x27,
++    kTCReturnLinkedListCorrupted = 0x28,
++
++    /* Image 4 return errors */
++    kTCReturnImage4Expired = 0xA0,
++    kTCReturnImage4UnknownFormat = 0xA1,
++    kTCReturnImage4WrongObject = 0xA2,
++    kTCReturnImage4WrongCrypto = 0xA3,
++    kTCReturnImage4ManifestViolation = 0xA4,
++    kTCReturnImage4PayloadViolation = 0xA5,
++    kTCReturnImage4PermissionDenied = 0xA6,
++    kTCReturnImage4NoChipAvailable = 0xA7,
++    kTCReturnImage4NoNonceAvailable = 0xA8,
++    kTCReturnImage4NoDeviceAvailable = 0xA9,
++    kTCReturnImage4DecodeError = 0xAA,
++    kTCReturnImage4UnknownError = 0xAF,
++
++    /* Cannot exceed this value */
++    kTCReturnTotal = 0xFF
++};
++
++typedef struct _TCReturn {
++    union {
++        /* Raw 32 bit representation of the return code */
++        uint32_t rawValue;
++
++        /* Formatted representation of the return code */
++        struct {
++            /* Component of the library which is returning the code */
++            uint8_t component;
++
++            /* Error code which is being returned */
++            uint8_t error;
++
++            /* Unique error path within the component */
++            uint16_t uniqueError;
++        } __attribute__((packed));
++    } __attribute__((packed));
++} __attribute__((packed)) TCReturn_t;
++
++/* Ensure the size of the structure remains as expected */
++_Static_assert(sizeof(TCReturn_t) == sizeof(uint32_t), "TCReturn_t is not 32 bits large");
++
++static inline TCReturn_t
++buildTCRet(uint8_t component,
++           uint8_t error,
++           uint16_t uniqueError)
++{
++    TCReturn_t ret = {
++        .component = component,
++        .error = error,
++        .uniqueError = uniqueError
++    };
++
++    return ret;
++}
++
++__END_DECLS
++#endif /* libTrustCache_Return_h */
+diff --git a/EXTERNAL_HEADERS/TrustCache/Types.h b/EXTERNAL_HEADERS/TrustCache/Types.h
+new file mode 100644
+index 00000000..f3412f38
+--- /dev/null
++++ b/EXTERNAL_HEADERS/TrustCache/Types.h
+@@ -0,0 +1,320 @@
++#ifndef libTrustCache_Types_h
++#define libTrustCache_Types_h
++
++#include <sys/cdefs.h>
++__BEGIN_DECLS
++
++#include <stdint.h>
++#include <img4/firmware.h>
++#include <TrustCache/RawTypes.h>
++
++typedef uint8_t TCType_t;
++enum {
++    /*
++     * These types of trust caches are always loaded as modules. Their validation
++     * is done externally by upper-level software.
++     *
++     * Static trust caches are bundled with the operating system and are the primary
++     * method of denoting platform trust. Engineering trust caches are similar to
++     * static trust caches except that they can be created by engineers at their
++     * desk as a root for a static trust cache. Legacy trust caches are image3 signed
++     * modules. This library does not support validating image3 signatures, so it
++     * accepts the trust caches only as direct modules. These are still considered
++     * loadable trust caches.
++     */
++    kTCTypeStatic = 0x00,
++    kTCTypeEngineering = 0x01,
++    kTCTypeLegacy = 0x02,
++
++    /*
++     * Do NOT change the order of the types listed here. This header is shared across
++     * a variety of projects and they update at different cadences. Adding a new type
++     * requires appending to the end of the enumeration, instead of insertion in the
++     * middle somewhere.
++     */
++
++    /*
++     * Type: Personalized
++     * These are engineering roots which are only ever valid for development devices.
++     * These can be created by engineers at their desks for testing software.
++     */
++    kTCTypeDTRS = 0x03,
++
++    /*
++     * Type: Personalized
++     * These are loadable trust caches which are viable for all kinds of devices and
++     * can be used for testing, but also for shipping code in production devices.
++     */
++    kTCTypeLTRS = 0x04,
++
++    /*
++     * Type: Personalized
++     * Used by disk images which are used to supply platform code for a number of use
++     * cases, including the multidude of disk images supplied for engineering use-cases
++     * such as the factoey disk image.
++     */
++    kTCTypePersonalizedDiskImage = 0x05,
++
++    /*
++     * Type: Categorized
++     * Developer disk images which are personalized per device. These have a different
++     * tag than standard loadable trust caches and helps differentiate them. However,
++     * these were never productionized and are for all purposes, retired.
++     */
++    kTCTypeDeveloperDiskImage = 0x06,
++
++    /*
++     * Type: Personalized
++     * These trust caches are similar to a personalized LTRS trust cache type except
++     * they are personalized against a long lived nonce, allowing these to remain
++     * useable across reboots of the system.
++     */
++    kTCTypeLTRSWithDDINonce = 0x07,
++
++    /*
++     * Type: Personalized
++     * These trust cache types are used to authenticate code shipped in Cryptexes for
++     * security research devices. Outside of the SRD, these are also used in some data
++     * center use cases which deploy code through Cryptexes.
++     */
++    kTCTypeCryptex = 0x08,
++
++    /*
++     * Type: Personalized (against supplemental root)
++     * These are special trust caches which validate against a supplemental root beyond
++     * Tatsu. These are only meant for special deployments within some data centers.
++     *
++     * NOTE: This type is deprecated in favor of the newer Supplemental Persistent
++     * and Supplemental Ephemeral types.
++     */
++    kTCTypeEphemeralCryptex = 0x09,
++
++    /*
++     * Type: Global
++     * OTA updates ship an update brain to assist with the OS update. The brain is some
++     * code with platform privileges which can do whatever the current OS needs it to do
++     * in order to update the system.
++     */
++    kTCTypeUpdateBrain = 0x0A,
++
++    /*
++     * Type: Global
++     * Trust caches which are loaded by the Install Assistant on macOS in order to help
++     * with installing macOS.
++     */
++    kTCTypeInstallAssistant = 0x0B,
++
++    /*
++     * Type: Global
++     * These are used by macOS systems to ship a bootability brain. The bootability brain
++     * is a piece of code which helps determine if macOS systems of a different version
++     * are bootable or not. The brain is useful because the logic for determining that a
++     * system is bootable or not differs with each release.
++     */
++    kTCTypeBootabilityBrain = 0x0C,
++
++    /*
++     * Type: Personalized (against Cryptex 1 Boot/Preboot environments)
++     * These trust cache types are used by SPLAT at different stages of the boot pipeline
++     * for loading code responsible for system boot up, such as the shared cache.
++     *
++     * The personalization uses a Cryptex1 nonce domain, which is embedded within the
++     * manifest itself.
++     */
++    kTCTypeCryptex1BootOS = 0x0D,
++    kTCTypeCryptex1BootApp = 0x0E,
++    kTCTypeCryptex1PreBootApp = 0x0F,
++
++    /*
++     * Type: Global
++     * These are disk images which are globally signed against the FF00 chip environment.
++     * They are used when disk images want to supply code for devices across the fleet
++     * without requiring individual personalization for each.
++     *
++     * The developer disk image is supplied through this mechanism as well, as of January
++     * 5th, 2022.
++     */
++    kTCTypeGlobalDiskImage = 0x10,
++
++    /*
++     * Type: Personalized (Cryptex1 mobile asset brain)
++     * The mobile asset brain contains the core logic for mobileassetd, which is a system
++     * daemon responsible for downloading and maintaining assets on the device. The brain
++     * is meant to be back-deployable, which is what the trust cache helps with.
++     *
++     * The personalization uses a Cryptex1 nonce domain, which is embedded within the
++     * manifest itself.
++     */
++    kTCTypeMobileAssetBrain = 0x11,
++
++    /*
++     * Type: Personalized (Cryptex1 boot reduced)
++     * Safari is backported to older builds. Since Safari is now moving to a SPLAT based
++     * mount volume, we need to support loading a trust cache which is used to mount and
++     * run Safari from the future.
++     *
++     * The personalization uses a Cryptex1 nonce domain, which is embedded within the
++     * manifest itself.
++     */
++    kTCTypeSafariDownlevel = 0x12,
++
++    /*
++     * Type: Personalized (Cryptex 1 Preboot)
++     * This trust cache type is used for the semi-SPLAT use-case for loading the new dyld
++     * shared cache onto the platform, along with some other system libraries. This is
++     * only required for macOS.
++     *
++     * The personalization uses a Cryptex1 nonce domain, which is embedded within the
++     * manifest itself.
++     */
++    kTCTypeCryptex1PreBootOS = 0x13,
++
++    /*
++     * Type: Personalized (Supplemental Root)
++     * Persistent trust caches which are signed by an authority different from Tatsu.
++     * These are only required for deployment on darwinOS platforms.
++     */
++    kTCTypeSupplementalPersistent = 0x14,
++
++    /*
++     * Type: Personalized (Supplemental Root)
++     * Ephemeral trust caches which are signed by an authority different from Tatsu.
++     * These are only required for deployment on darwinOS platforms.
++     */
++    kTCTypeSupplementalEphemeral = 0x15,
++
++    /*
++     * Type: Personalized (Cryptex1 Generic)
++     * This type can be used by the assortment of PDIs we ship. Each PDI train can opt
++     * into allocating a Cryptex1 sub-type for itself, and then ship on the OS being
++     * signed by the Cryptex1 generic environment. This allows the PDI to adopt Cryptex1
++     * personalization without requiring a new bespoke trust cache type.
++     *
++     * The personalization uses a Cryptex1 nonce domain, which is embedded within the
++     * manifest itself.
++     */
++    kTCTypeCryptex1Generic = 0x16,
++
++    /*
++     * Type: Personalized (Cryptex1 Generic Supplemental)
++     * Similar to the kTCTypeCryptex1Generic type except the manifest is signed by the
++     * supplemental root of trust. Only viable for some data center use-cases.
++     *
++     * The personalization uses a Cryptex1 nonce domain, which is embedded within the
++     * manifest itself.
++     */
++    kTCTypeCryptex1GenericSupplemental = 0x17,
++
++    kTCTypeTotal,
++
++    /* Invalid type */
++    kTCTypeInvalid = 0xFF,
++};
++
++/* Availability macros for different trust cache types */
++#define kLibTrustCacheHasCryptex1BootOS 1
++#define kLibTrustCacheHasCryptex1BootApp 1
++#define kLibTrustCacheHasCryptex1PreBootApp 1
++#define kLibTrustCacheHasMobileAssetBrain 1
++#define kLibTrustCacheHasSafariDownlevel 1
++#define kLibTrustCacheHasCryptex1PreBootOS 1
++#define kLibTrustCacheHasSupplementalPersistent 1
++#define kLibTrustCacheHasSupplementalEphemeral 1
++#define kLibTrustCacheHasCryptex1Generic 1
++#define kLibTrustCacheHasCryptex1GenericSupplemental 1
++
++typedef struct _TrustCache {
++    /* Linked list linkage for the trust cache */
++    struct _TrustCache *next;
++    struct _TrustCache *prev;
++
++    /* The type of this trust cache */
++    TCType_t type;
++
++    /* TODO: Add reference counts when we support unloading */
++
++    /* The trust cache module itself */
++    size_t moduleSize;
++    const TrustCacheModuleBase_t *module;
++} TrustCache_t;
++
++typedef uint8_t TCQueryType_t;
++enum {
++    /* Query all types of trust caches in the runtime */
++    kTCQueryTypeAll = 0x00,
++
++    /* Static query type includes engineering trust caches */
++    kTCQueryTypeStatic = 0x01,
++
++    /* Most first party trust cache types are loadable ones */
++    kTCQueryTypeLoadable = 0x02,
++
++    kTCQueryTypeTotal,
++};
++
++typedef uint64_t TCCapabilities_t;
++enum {
++    /* Supports no capabilities */
++    kTCCapabilityNone = 0,
++
++    /* Supports the hash type field */
++    kTCCapabilityHashType = (1 << 0),
++
++    /* Supports the flags field */
++    kTCCapabilityFlags = (1 << 1),
++
++    /* Supports the constraints category field */
++    kTCCapabilityConstraintsCategory = (1 << 2),
++};
++
++typedef struct _TrustCacheQueryToken {
++    /* Trust cache where query was found */
++    const TrustCache_t *trustCache;
++
++    /* Entry within the trust cache where query was found */
++    const void *trustCacheEntry;
++} TrustCacheQueryToken_t;
++
++/*
++ * The runtime data structure is setup in a very special way. To make use of HW mitigations
++ * offered by the silicon, the runtime can be placed in a region which is locked down by the
++ * HW at some commit point. This theoretically allows the static and the engineering trust
++ * caches to be locked down and immutable if the storage for the trust cache data structure
++ * is also allocated within this same immutable memory segment.
++ *
++ * At the same time, we need to be able to support dynamically loaded trust caches on the
++ * system. We can't keep a list head within the runtime for these trust caches, since that
++ * head will be locked down when the runtime is locked, preventing us from adding a new link
++ * in the chain. To solve this, the runtime instead stores a pointer to a wrapped data structure.
++ * This pointer itself is locked down and can't be changed, but the contents of the wrapped
++ * structure are mutable, making it a good place to store the linked list head.
++ */
++
++/* Data structure expected to be stored within mutable memory */
++typedef struct _TrustCacheMutableRuntime {
++    /* Loadable trust caches on the system */
++    TrustCache_t *loadableTCHead;
++} TrustCacheMutableRuntime_t;
++
++/* Data structure expected to be stored within immutable memory */
++typedef struct _TrustCacheRuntime {
++    /* Runtime to use for image 4 object verification */
++    const img4_runtime_t *image4RT;
++
++    /* Configuration for trust cache types */
++    bool allowSecondStaticTC;
++    bool allowEngineeringTC;
++    bool allowLegacyTC;
++
++    /* Static trust cache for the system */
++    TrustCache_t *staticTCHead;
++
++    /* Engineering trust caches for the system */
++    TrustCache_t *engineeringTCHead;
++
++    /* Mutable runtime instance */
++    TrustCacheMutableRuntime_t *mutableRT;
++} TrustCacheRuntime_t;
++
++__END_DECLS
++#endif /* libTrustCache_Types_h */
+diff --git a/EXTERNAL_HEADERS/TrustCache/TypesConfig.h b/EXTERNAL_HEADERS/TrustCache/TypesConfig.h
+new file mode 100644
+index 00000000..d93e8b09
+--- /dev/null
++++ b/EXTERNAL_HEADERS/TrustCache/TypesConfig.h
+@@ -0,0 +1,389 @@
++#ifndef libTrustCache_TypesConfig_h
++#define libTrustCache_TypesConfig_h
++
++#include <sys/cdefs.h>
++__BEGIN_DECLS
++
++#include <TrustCache/Types.h>
++
++#if XNU_KERNEL_PRIVATE
++/*
++ * The AppleImage4 API definitions are accessed through the 'img4if' indirection
++ * layer within XNU itself. Kernel extensions can access them directly from the
++ * AppleImage4 headers.
++ */
++#include <libkern/img4/interface.h>
++#endif
++
++#if !XNU_KERNEL_PRIVATE
++/*
++ * XNU does not make this header available and uses different availability macros
++ * than kernel extensions or base user-space applications.
++ */
++#include <TargetConditionals.h>
++#endif
++
++#pragma mark Chip Environments
++
++static const img4_chip_t*
++chipEnvironmentPersonalized(void) {
++    return img4_chip_select_personalized_ap();
++}
++
++static const img4_chip_t*
++chipEnvironmentCategorized(void) {
++    return img4_chip_select_categorized_ap();
++}
++
++static const img4_chip_t*
++chipEnvironmentGlobalFF00(void) {
++    return IMG4_CHIP_AP_SOFTWARE_FF00;
++}
++
++static const img4_chip_t*
++chipEnvironmentGlobalFF01(void) {
++    return IMG4_CHIP_AP_SOFTWARE_FF01;
++}
++
++static const img4_chip_t*
++chipEnvironmentGlobalFF06(void) {
++    return IMG4_CHIP_AP_SOFTWARE_FF06;
++}
++
++static const img4_chip_t*
++chipEnvironmentEphemeralCryptex(void) {
++    return IMG4_CHIP_AP_SUPPLEMENTAL;
++}
++
++static const img4_chip_t*
++chipEnvironmentCryptex1Boot(void) {
++#if IMG4_API_VERSION >= 20211126
++    return img4_chip_select_cryptex1_boot();
++#else
++    return NULL;
++#endif
++}
++
++static const img4_chip_t*
++chipEnvironmentCryptex1PreBoot(void) {
++#if IMG4_API_VERSION >= 20211126
++    return img4_chip_select_cryptex1_preboot();
++#else
++    return NULL;
++#endif
++}
++
++static const img4_chip_t*
++chipEnvironmentCryptex1MobileAsset(void) {
++#if IMG4_API_VERSION >= 20211126
++    return IMG4_CHIP_CRYPTEX1_ASSET;
++#else
++    return NULL;
++#endif
++}
++
++static const img4_chip_t*
++chipEnvironmentSafariDownlevel(void) {
++#if IMG4_API_VERSION >= 20211126
++    return IMG4_CHIP_CRYPTEX1_BOOT_REDUCED;
++#else
++    return NULL;
++#endif
++}
++
++static const img4_chip_t*
++chipEnvironmentSupplemental(void) {
++    return IMG4_CHIP_AP_SUPPLEMENTAL;
++}
++
++static const img4_chip_t*
++chipEnvironmentCryptex1Generic(void) {
++#if IMG4_API_VERSION >= 20221202
++    return IMG4_CHIP_CRYPTEX1_GENERIC;
++#else
++    return NULL;
++#endif
++}
++
++static const img4_chip_t*
++chipEnvironmentCryptex1GenericSupplemental(void) {
++#if IMG4_API_VERSION >= 20221202
++    return IMG4_CHIP_CRYPTEX1_GENERIC_SUPPLEMENTAL;
++#else
++    return NULL;
++#endif
++}
++
++#pragma mark Nonce Domains
++
++static const img4_nonce_domain_t*
++nonceDomainTrustCache(void) {
++    return IMG4_NONCE_DOMAIN_TRUST_CACHE;
++}
++
++static const img4_nonce_domain_t*
++nonceDomainDDI(void) {
++    return IMG4_NONCE_DOMAIN_DDI;
++}
++
++static const img4_nonce_domain_t*
++nonceDomainCryptex(void) {
++    return IMG4_NONCE_DOMAIN_CRYPTEX;
++}
++
++static const img4_nonce_domain_t*
++nonceDomainEphemeralCryptex(void) {
++    return IMG4_NONCE_DOMAIN_EPHEMERAL_CRYPTEX;
++}
++
++static const img4_nonce_domain_t*
++nonceDomainPDI(void) {
++    return IMG4_NONCE_DOMAIN_PDI;
++}
++
++#pragma mark Firmware Flags
++
++static img4_firmware_flags_t
++firmwareFlagsDTRS(void) {
++    return IMG4_FIRMWARE_FLAG_RESPECT_AMNM;
++}
++
++static img4_firmware_flags_t
++firmwareFlagsSplat(void) {
++#if XNU_TARGET_OS_OSX && (defined(__arm__) || defined(__arm64__))
++    return IMG4_FIRMWARE_FLAG_SUBSEQUENT_STAGE;
++#elif defined(TARGET_OS_OSX) && TARGET_OS_OSX && (TARGET_CPU_ARM || TARGET_CPU_ARM64)
++    return IMG4_FIRMWARE_FLAG_SUBSEQUENT_STAGE;
++#else
++    return IMG4_FIRMWARE_FLAG_INIT;
++#endif
++}
++
++#pragma mark Type Configuration
++
++typedef struct _TrustCacheTypeConfig {
++    /* Chip environment to use for validation */
++    const img4_chip_t* (*chipEnvironment)(void);
++
++    /* Nonce domain for anti-replay */
++    const img4_nonce_domain_t* (*nonceDomain)(void);
++
++    /* Four CC identifier for this type */
++    img4_4cc_t fourCC;
++
++    /* Firmware flags to add for this configuration */
++    img4_firmware_flags_t (*firmwareFlags)(void);
++
++    /*
++     * Higher level policy imposes restrictions on which process can load
++     * which trust cache. These restrictions are enforced through the use
++     * of the entitlement "com.apple.private.pmap.load-trust-cache". The
++     * value here is the required value of the above entitlement.
++     */
++    const char *entitlementValue;
++} TrustCacheTypeConfig_t;
++
++#pragma GCC diagnostic push
++#pragma GCC diagnostic ignored "-Wfour-char-constants"
++
++static const TrustCacheTypeConfig_t TCTypeConfig[kTCTypeTotal] = {
++    /* Static trust caches are loaded as raw modules */
++    [kTCTypeStatic] = {
++        .chipEnvironment = NULL,
++        .nonceDomain = NULL,
++        .fourCC = 0,
++        .firmwareFlags = NULL,
++        .entitlementValue = NULL
++    },
++
++    /* Engineering trust caches are loaded as raw modules */
++    [kTCTypeEngineering] = {
++        .chipEnvironment = NULL,
++        .nonceDomain = NULL,
++        .fourCC = 0,
++        .firmwareFlags = NULL,
++        .entitlementValue = NULL
++    },
++
++    /* Legacy trust caches are loaded as raw modules */
++    [kTCTypeLegacy] = {
++        .chipEnvironment = NULL,
++        .nonceDomain = NULL,
++        .fourCC = 0,
++        .firmwareFlags = NULL,
++        .entitlementValue = NULL
++    },
++
++    [kTCTypeDTRS] = {
++        .chipEnvironment = chipEnvironmentPersonalized,
++        .nonceDomain = NULL,
++        .fourCC = 'dtrs',
++        .firmwareFlags = firmwareFlagsDTRS,
++        .entitlementValue = "personalized.engineering-root"
++    },
++
++    [kTCTypeLTRS] = {
++        .chipEnvironment = chipEnvironmentPersonalized,
++        .nonceDomain = nonceDomainTrustCache,
++        .fourCC = 'ltrs',
++        .firmwareFlags = NULL,
++        .entitlementValue = "personalized.trust-cache"
++    },
++
++    [kTCTypePersonalizedDiskImage] = {
++        .chipEnvironment = chipEnvironmentPersonalized,
++        .nonceDomain = nonceDomainPDI,
++        .fourCC = 'ltrs',
++        .firmwareFlags = NULL,
++        .entitlementValue = "personalized.pdi"
++    },
++
++    [kTCTypeDeveloperDiskImage] = {
++        .chipEnvironment = chipEnvironmentCategorized,
++        .nonceDomain = nonceDomainDDI,
++        .fourCC = 'trdv',
++        .firmwareFlags = NULL,
++        .entitlementValue = "personalized.ddi"
++    },
++
++    [kTCTypeLTRSWithDDINonce] = {
++        .chipEnvironment = chipEnvironmentPersonalized,
++        .nonceDomain = nonceDomainDDI,
++        .fourCC = 'ltrs',
++        .firmwareFlags = NULL,
++        .entitlementValue = "personalized.ddi"
++    },
++
++    [kTCTypeCryptex] = {
++        .chipEnvironment = chipEnvironmentPersonalized,
++        .nonceDomain = nonceDomainCryptex,
++        .fourCC = 'ltrs',
++        .firmwareFlags = NULL,
++        .entitlementValue = "personalized.cryptex-research"
++    },
++
++    [kTCTypeEphemeralCryptex] = {
++        .chipEnvironment = chipEnvironmentEphemeralCryptex,
++        .nonceDomain = nonceDomainEphemeralCryptex,
++        .fourCC = 'ltrs',
++        .firmwareFlags = NULL,
++        .entitlementValue = "personalized.ephemeral-cryptex"
++    },
++
++    [kTCTypeUpdateBrain] = {
++        .chipEnvironment = chipEnvironmentGlobalFF00,
++        .nonceDomain = NULL,
++        .fourCC = 'ltrs',
++        .firmwareFlags = NULL,
++        .entitlementValue = "global.ota-update-brain"
++    },
++
++    [kTCTypeInstallAssistant] = {
++        .chipEnvironment = chipEnvironmentGlobalFF01,
++        .nonceDomain = NULL,
++        .fourCC = 'ltrs',
++        .firmwareFlags = NULL,
++        .entitlementValue = "global.install-assistant"
++    },
++
++    [kTCTypeBootabilityBrain] = {
++        .chipEnvironment = chipEnvironmentGlobalFF06,
++        .nonceDomain = NULL,
++        .fourCC = 'trbb',
++        .firmwareFlags = NULL,
++        .entitlementValue = "global.bootability-brain"
++    },
++
++    [kTCTypeCryptex1BootOS] = {
++        .chipEnvironment = chipEnvironmentCryptex1Boot,
++        .nonceDomain = NULL,
++        .fourCC = 'trcs',
++        .firmwareFlags = firmwareFlagsSplat,
++        .entitlementValue = "cryptex1.boot.os"
++    },
++
++    [kTCTypeCryptex1BootApp] = {
++        .chipEnvironment = chipEnvironmentCryptex1Boot,
++        .nonceDomain = NULL,
++        .fourCC = 'trca',
++        .firmwareFlags = firmwareFlagsSplat,
++        .entitlementValue = "cryptex1.boot.app"
++    },
++
++    [kTCTypeCryptex1PreBootApp] = {
++        .chipEnvironment = chipEnvironmentCryptex1PreBoot,
++        .nonceDomain = NULL,
++        .fourCC = 'trca',
++        .firmwareFlags = firmwareFlagsSplat,
++        .entitlementValue = "cryptex1.preboot.app"
++    },
++
++    [kTCTypeGlobalDiskImage] = {
++        .chipEnvironment = chipEnvironmentGlobalFF00,
++        .nonceDomain = NULL,
++        .fourCC = 'ltrs',
++        .firmwareFlags = NULL,
++        .entitlementValue = "global.pdi"
++    },
++
++    [kTCTypeMobileAssetBrain] = {
++        .chipEnvironment = chipEnvironmentCryptex1MobileAsset,
++        .nonceDomain = NULL,
++        .fourCC = 'trab',
++        .firmwareFlags = NULL,
++        .entitlementValue = "personalized.mobile-asset-brain"
++    },
++
++    [kTCTypeSafariDownlevel] = {
++        .chipEnvironment = chipEnvironmentSafariDownlevel,
++        .nonceDomain = NULL,
++        .fourCC = 'trca',
++        .firmwareFlags = NULL,
++        .entitlementValue = "cryptex1.safari-downlevel"
++    },
++
++    [kTCTypeCryptex1PreBootOS] = {
++        .chipEnvironment = chipEnvironmentCryptex1PreBoot,
++        .nonceDomain = NULL,
++        .fourCC = 'trcs',
++        .firmwareFlags = firmwareFlagsSplat,
++        .entitlementValue = "cryptex1.preboot.os"
++    },
++
++    [kTCTypeSupplementalPersistent] = {
++        .chipEnvironment = chipEnvironmentSupplemental,
++        .nonceDomain = nonceDomainDDI,
++        .fourCC = 'ltrs',
++        .firmwareFlags = NULL,
++        .entitlementValue = "personalized.supplemental-persistent"
++    },
++
++    [kTCTypeSupplementalEphemeral] = {
++        .chipEnvironment = chipEnvironmentSupplemental,
++        .nonceDomain = nonceDomainPDI,
++        .fourCC = 'ltrs',
++        .firmwareFlags = NULL,
++        .entitlementValue = "personalized.supplemental-ephemeral"
++    },
++
++    [kTCTypeCryptex1Generic] = {
++        .chipEnvironment = chipEnvironmentCryptex1Generic,
++        .nonceDomain = NULL,
++        .fourCC = 'gtcd',
++        .firmwareFlags = NULL,
++        .entitlementValue = "cryptex1.generic"
++    },
++
++    [kTCTypeCryptex1GenericSupplemental] = {
++        .chipEnvironment = chipEnvironmentCryptex1GenericSupplemental,
++        .nonceDomain = NULL,
++        .fourCC = 'gtcd',
++        .firmwareFlags = NULL,
++        .entitlementValue = "cryptex1.generic.supplemental"
++    }
++};
++
++#pragma GCC diagnostic pop
++
++__END_DECLS
++#endif /* libTrustCache_TypesConfig_h */
+diff --git a/EXTERNAL_HEADERS/iBoot/boot_args_abi.h b/EXTERNAL_HEADERS/iBoot/boot_args_abi.h
+new file mode 100644
+index 00000000..cc3b984f
+--- /dev/null
++++ b/EXTERNAL_HEADERS/iBoot/boot_args_abi.h
+@@ -0,0 +1,11 @@
++#ifndef _IBOOT_BOOT_ARGS_ABI_H_
++#define _IBOOT_BOOT_ARGS_ABI_H_
++
++/*
++ * Minimal stub of the iBoot boot arguments ABI definitions needed by the
++ * open-source XNU kernel build. Only the maximum environment variable data
++ * size constant is required for sizing the command line buffer.
++ */
++#define IBOOT_MAX_ENV_VAR_DATA_SIZE 4096
++
++#endif /* _IBOOT_BOOT_ARGS_ABI_H_ */
+diff --git a/EXTERNAL_HEADERS/libDER/DERItem.h b/EXTERNAL_HEADERS/libDER/DERItem.h
+new file mode 100644
+index 00000000..e464d6f3
+--- /dev/null
++++ b/EXTERNAL_HEADERS/libDER/DERItem.h
+@@ -0,0 +1,47 @@
++/*
++ * Copyright (c) 2020 Apple Inc. All Rights Reserved.
++ *
++ * @APPLE_LICENSE_HEADER_START@
++ *
++ * This file contains Original Code and/or Modifications of Original Code
++ * as defined in and that are subject to the Apple Public Source License
++ * Version 2.0 (the 'License'). You may not use this file except in
++ * compliance with the License. Please obtain a copy of the License at
++ * http://www.opensource.apple.com/apsl/ and read it before using this
++ * file.
++ *
++ * The Original Code and all software distributed under the License are
++ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
++ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
++ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
++ * Please see the License for the specific language governing rights and
++ * limitations under the License.
++ *
++ * @APPLE_LICENSE_HEADER_END@
++ */
++
++#ifndef _DER_ITEM_H_
++#define _DER_ITEM_H_
++
++#include <libDER/libDER_config.h>
++
++__BEGIN_DECLS
++
++#ifndef DER_counted_by
++#define DER_counted_by(x)
++#endif
++
++/*
++ * Primary representation of a block of memory.
++ */
++typedef struct {
++    DERByte        *DER_counted_by(length) data;
++    DERSize        length;
++} DERItem;
++
++__END_DECLS
++
++#endif    /* _DER_ITEM_H_ */
++
++
+diff --git a/EXTERNAL_HEADERS/libDER/DER_CertCrl.h b/EXTERNAL_HEADERS/libDER/DER_CertCrl.h
+new file mode 100644
+index 00000000..dc3e9bd0
+--- /dev/null
++++ b/EXTERNAL_HEADERS/libDER/DER_CertCrl.h
+@@ -0,0 +1,276 @@
++/*
++ * Copyright (c) 2005-2016 Apple Inc. All Rights Reserved.
++ *
++ * @APPLE_LICENSE_HEADER_START@
++ * 
++ * This file contains Original Code and/or Modifications of Original Code
++ * as defined in and that are subject to the Apple Public Source License
++ * Version 2.0 (the 'License'). You may not use this file except in
++ * compliance with the License. Please obtain a copy of the License at
++ * http://www.opensource.apple.com/apsl/ and read it before using this
++ * file.
++ * 
++ * The Original Code and all software distributed under the License are
++ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
++ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
++ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
++ * Please see the License for the specific language governing rights and
++ * limitations under the License.
++ * 
++ * @APPLE_LICENSE_HEADER_END@
++ */
++
++
++/*
++ * DER_CertCrl.h - support for decoding X509 certificates and CRLs
++ *
++ */
++ 
++#ifndef	_DER_CERT_CRL_H_
++#define _DER_CERT_CRL_H_
++
++#include <libDER/libDER_config.h>
++#include <libDER/libDER.h>
++#include <libDER/DER_Decode.h>
++
++__BEGIN_DECLS
++
++/* 
++ * Top level cert or CRL - the two are identical at this level - three 
++ * components. The tbs field is saved in full DER form for sig verify. 
++ */
++typedef struct {
++	DERItem		tbs;			/* sequence, DERTBSCert, DER_DEC_SAVE_DER */
++	DERItem		sigAlg;			/* sequence, DERAlgorithmId */
++	DERItem		sig;			/* bit string */
++} DERSignedCertCrl;
++
++/* DERItemSpecs to decode into a DERSignedCertCrl */
++extern const DERSize DERNumSignedCertCrlItemSpecs;
++extern const DERItemSpec DERSignedCertCrlItemSpecs[DER_counted_by(DERNumSignedCertCrlItemSpecs)];
++
++/* TBS cert components */
++typedef struct {
++	DERItem		version;		/* integer, optional, EXPLICIT */
++	DERItem		serialNum;		/* integer */
++	DERItem		tbsSigAlg;		/* sequence, DERAlgorithmId */
++	DERItem		issuer;			/* sequence, TBD */
++	DERItem		validity;		/* sequence,  DERValidity */
++	DERItem		subject;		/* sequence, TBD */
++	DERItem		subjectPubKey;	/* sequence, DERSubjPubKeyInfo */
++	DERItem		issuerID;		/* bit string, optional */
++	DERItem		subjectID;		/* bit string, optional */
++	DERItem		extensions;		/* sequence, optional, EXPLICIT */
++} DERTBSCert;
++
++/* DERItemSpecs to decode into a DERTBSCert */
++extern const DERSize DERNumTBSCertItemSpecs;
++extern const DERItemSpec DERTBSCertItemSpecs[DER_counted_by(DERNumTBSCertItemSpecs)];
++
++/* 
++ * validity - components can be either UTC or generalized time.
++ * Both are ASN_ANY with DER_DEC_SAVE_DER.
++ */
++typedef struct {
++	DERItem		notBefore;
++	DERItem		notAfter;
++} DERValidity;
++
++/* DERItemSpecs to decode into a DERValidity */
++extern const DERSize DERNumValidityItemSpecs;
++extern const DERItemSpec DERValidityItemSpecs[DER_counted_by(DERNumValidityItemSpecs)];
++
++/* AttributeTypeAndValue components. */
++typedef struct {
++	DERItem		type;
++	DERItem		value;
++} DERAttributeTypeAndValue;
++
++/* DERItemSpecs to decode into DERAttributeTypeAndValue */
++extern const DERSize DERNumAttributeTypeAndValueItemSpecs;
++extern const DERItemSpec DERAttributeTypeAndValueItemSpecs[DER_counted_by(DERNumAttributeTypeAndValueItemSpecs)];
++
++/* Extension components */
++typedef struct {
++	DERItem		extnID;
++	DERItem		critical;
++	DERItem		extnValue;
++} DERExtension;
++
++/* DERItemSpecs to decode into DERExtension */
++extern const DERSize DERNumExtensionItemSpecs;
++extern const DERItemSpec DERExtensionItemSpecs[DER_counted_by(DERNumExtensionItemSpecs)];
++
++/* BasicConstraints components. */
++typedef struct {
++	DERItem		cA;
++	DERItem		pathLenConstraint;
++} DERBasicConstraints;
++
++/* DERItemSpecs to decode into DERBasicConstraints */
++extern const DERSize DERNumBasicConstraintsItemSpecs;
++extern const DERItemSpec DERBasicConstraintsItemSpecs[DER_counted_by(DERNumBasicConstraintsItemSpecs)];
++
++/* NameConstraints components. */
++typedef struct {
++    DERItem		permittedSubtrees;
++    DERItem		excludedSubtrees;
++} DERNameConstraints;
++
++/* DERItemSpecs to decode into a DERNameConstraints */
++extern const DERSize DERNumNameConstraintsItemSpecs;
++extern const DERItemSpec DERNameConstraintsItemSpecs[DER_counted_by(DERNumNameConstraintsItemSpecs)];
++
++/* GeneralSubtree components. */
++typedef struct {
++    DERItem		generalName;
++    DERItem		minimum;
++    DERItem		maximum;
++} DERGeneralSubtree;
++
++/* DERItemSpecs to decode into a DERGeneralSubtree */
++extern const DERSize DERNumGeneralSubtreeItemSpecs;
++extern const DERItemSpec DERGeneralSubtreeItemSpecs[DER_counted_by(DERNumGeneralSubtreeItemSpecs)];
++
++/* PrivateKeyUsagePeriod components. */
++typedef struct {
++	DERItem		notBefore;
++	DERItem		notAfter;
++} DERPrivateKeyUsagePeriod;
++
++/* DERItemSpecs to decode into a DERPrivateKeyUsagePeriod */
++extern const DERSize DERNumPrivateKeyUsagePeriodItemSpecs;
++extern const DERItemSpec DERPrivateKeyUsagePeriodItemSpecs[DER_counted_by(DERNumPrivateKeyUsagePeriodItemSpecs)];
++
++/* DistributionPoint components. */
++typedef struct {
++	DERItem		distributionPoint;
++	DERItem		reasons;
++    DERItem     cRLIssuer;
++} DERDistributionPoint;
++
++/* DERItemSpecs to decode into a DERDistributionPoint */
++extern const DERSize DERNumDistributionPointItemSpecs;
++extern const DERItemSpec DERDistributionPointItemSpecs[DER_counted_by(DERNumDistributionPointItemSpecs)];
++
++/* PolicyInformation components. */
++typedef struct {
++    DERItem policyIdentifier;
++    DERItem policyQualifiers;
++} DERPolicyInformation;
++
++/* DERItemSpecs to decode into a DERPolicyInformation */
++extern const DERSize DERNumPolicyInformationItemSpecs;
++extern const DERItemSpec DERPolicyInformationItemSpecs[DER_counted_by(DERNumPolicyInformationItemSpecs)];
++
++/* PolicyQualifierInfo components. */
++typedef struct {
++    DERItem policyQualifierID;
++    DERItem qualifier;
++} DERPolicyQualifierInfo;
++
++/* DERItemSpecs to decode into a DERPolicyQualifierInfo */
++extern const DERSize DERNumPolicyQualifierInfoItemSpecs;
++extern const DERItemSpec DERPolicyQualifierInfoItemSpecs[DER_counted_by(DERNumPolicyQualifierInfoItemSpecs)];
++
++/* UserNotice components. */
++typedef struct {
++    DERItem noticeRef;
++    DERItem explicitText;
++} DERUserNotice;
++
++/* DERItemSpecs to decode into a DERUserNotice */
++extern const DERSize DERNumUserNoticeItemSpecs;
++extern const DERItemSpec DERUserNoticeItemSpecs[DER_counted_by(DERNumUserNoticeItemSpecs)];
++
++/* NoticeReference components. */
++typedef struct {
++    DERItem organization;
++    DERItem noticeNumbers;
++} DERNoticeReference;
++
++/* DERItemSpecs to decode into a DERNoticeReference */
++extern const DERSize DERNumNoticeReferenceItemSpecs;
++extern const DERItemSpec DERNoticeReferenceItemSpecs[DER_counted_by(DERNumNoticeReferenceItemSpecs)];
++
++/* PolicyMapping components. */
++typedef struct {
++    DERItem issuerDomainPolicy;
++    DERItem subjectDomainPolicy;
++} DERPolicyMapping;
++
++/* DERItemSpecs to decode into a DERPolicyMapping */
++extern const DERSize DERNumPolicyMappingItemSpecs;
++extern const DERItemSpec DERPolicyMappingItemSpecs[DER_counted_by(DERNumPolicyMappingItemSpecs)];
++
++/* AccessDescription components. */
++typedef struct {
++    DERItem accessMethod;
++    DERItem accessLocation;
++} DERAccessDescription;
++
++/* DERItemSpecs to decode into a DERAccessDescription */
++extern const DERSize DERNumAccessDescriptionItemSpecs;
++extern const DERItemSpec DERAccessDescriptionItemSpecs[DER_counted_by(DERNumAccessDescriptionItemSpecs)];
++
++/* AuthorityKeyIdentifier components. */
++typedef struct {
++    DERItem keyIdentifier;
++    DERItem authorityCertIssuer;
++    DERItem authorityCertSerialNumber;
++} DERAuthorityKeyIdentifier;
++
++/* DERItemSpecs to decode into a DERAuthorityKeyIdentifier */
++extern const DERSize DERNumAuthorityKeyIdentifierItemSpecs;
++extern const DERItemSpec DERAuthorityKeyIdentifierItemSpecs[DER_counted_by(DERNumAuthorityKeyIdentifierItemSpecs)];
++
++/* OtherName components. */
++typedef struct {
++    DERItem typeIdentifier;
++    DERItem value;
++} DEROtherName;
++
++/* DERItemSpecs to decode into a DEROtherName */
++extern const DERSize DERNumOtherNameItemSpecs;
++extern const DERItemSpec DEROtherNameItemSpecs[DER_counted_by(DERNumOtherNameItemSpecs)];
++
++/* PolicyConstraints components. */
++typedef struct {
++    DERItem requireExplicitPolicy;
++    DERItem inhibitPolicyMapping;
++} DERPolicyConstraints;
++
++/* DERItemSpecs to decode into a DERPolicyConstraints */
++extern const DERSize DERNumPolicyConstraintsItemSpecs;
++extern const DERItemSpec DERPolicyConstraintsItemSpecs[DER_counted_by(DERNumPolicyConstraintsItemSpecs)];
++
++/* TBS CRL */
++typedef struct {
++	DERItem		version;		/* integer, optional */
++	DERItem		tbsSigAlg;		/* sequence, DERAlgorithmId */
++	DERItem		issuer;			/* sequence, TBD */
++	DERItem		thisUpdate;		/* ASN_ANY, SAVE_DER */
++	DERItem		nextUpdate;		/* ASN_ANY, SAVE_DER */
++	DERItem		revokedCerts;	/* sequence of DERRevokedCert, optional */
++	DERItem		extensions;		/* sequence, optional, EXPLICIT */
++} DERTBSCrl;
++
++/* DERItemSpecs to decode into a DERTBSCrl */
++extern const DERSize DERNumTBSCrlItemSpecs;
++extern const DERItemSpec DERTBSCrlItemSpecs[DER_counted_by(DERNumTBSCrlItemSpecs)];
++
++typedef struct {
++	DERItem		serialNum;		/* integer */
++	DERItem		revocationDate;	/* time - ASN_ANY, SAVE_DER */
++	DERItem		extensions;		/* sequence, optional, EXPLICIT */
++} DERRevokedCert;
++
++/* DERItemSpecs to decode into a DERRevokedCert */
++extern const DERSize DERNumRevokedCertItemSpecs;
++extern const DERItemSpec DERRevokedCertItemSpecs[DER_counted_by(DERNumRevokedCertItemSpecs)];
++
++__END_DECLS
++
++#endif	/* _DER_CERT_CRL_H_ */
++
+diff --git a/EXTERNAL_HEADERS/libDER/DER_CodecUtils.h b/EXTERNAL_HEADERS/libDER/DER_CodecUtils.h
+new file mode 100644
+index 00000000..51a8bdab
+--- /dev/null
++++ b/EXTERNAL_HEADERS/libDER/DER_CodecUtils.h
+@@ -0,0 +1,68 @@
++/*
++ * Copyright (c) 2005-2017 Apple Inc. All Rights Reserved.
++ *
++ * @APPLE_LICENSE_HEADER_START@
++ *
++ * This file contains Original Code and/or Modifications of Original Code
++ * as defined in and that are subject to the Apple Public Source License
++ * Version 2.0 (the 'License'). You may not use this file except in
++ * compliance with the License. Please obtain a copy of the License at
++ * http://www.opensource.apple.com/apsl/ and read it before using this
++ * file.
++ *
++ * The Original Code and all software distributed under the License are
++ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
++ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
++ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
++ * Please see the License for the specific language governing rights and
++ * limitations under the License.
++ *
++ * @APPLE_LICENSE_HEADER_END@
++ */
++
++/*
++ * DER_CodecUtils.h - static inline functions common to DER_Encode and
++ * DER_Decode
++ */
++
++#ifndef DER_CodecUtils_h
++#define DER_CodecUtils_h
++
++#include <libDER/libDER_config.h>
++
++#if defined(__has_attribute) && __has_attribute(no_sanitize)
++#define DER_ALLOW_UNSIGNED_INTEGER_OVERFLOW \
++    __attribute__((no_sanitize("unsigned-integer-overflow")))
++#else
++#define DER_ALLOW_UNSIGNED_INTEGER_OVERFLOW
++#endif
++
++/*
++ * Returns 1 if fieldBase + fieldSize does not overflow and is greater than
++ * objSize, 0 otherwise.
++ */
++DER_ALLOW_UNSIGNED_INTEGER_OVERFLOW
++static inline int DEREndOffsetSmallerOrEqualTo(
++    DERSize fieldOffset,
++    DERSize fieldSize,
++    DERSize objSize)
++{
++    // can't use __builtin_add_overflow on Windows; rely on the definedness
++    // of unsigned integer math
++    DERSize endOffset = fieldOffset + fieldSize;
++    return endOffset >= fieldOffset && endOffset <= objSize;
++}
++
++/*
++ * Return the maximum possible length that `dst` could have without
++ * address calculations overflowing.
++ */
++static inline
++DERSize DERObjectMaxSize(const void *DER_unsafe_indexable ptr)
++{
++    DERSize maskOutTopBit = ~(DERSize)0 >> 1;
++    return ~(DERSize)ptr & maskOutTopBit;
++}
++
++#endif /* DER_CodecUtils_h */
+diff --git a/EXTERNAL_HEADERS/libDER/DER_Decode.h b/EXTERNAL_HEADERS/libDER/DER_Decode.h
+new file mode 100644
+index 00000000..a96be536
+--- /dev/null
++++ b/EXTERNAL_HEADERS/libDER/DER_Decode.h
+@@ -0,0 +1,298 @@
++/*
++ * Copyright (c) 2005-2017 Apple Inc. All Rights Reserved.
++ * 
++ * @APPLE_LICENSE_HEADER_START@
++ * 
++ * This file contains Original Code and/or Modifications of Original Code
++ * as defined in and that are subject to the Apple Public Source License
++ * Version 2.0 (the 'License'). You may not use this file except in
++ * compliance with the License. Please obtain a copy of the License at
++ * http://www.opensource.apple.com/apsl/ and read it before using this
++ * file.
++ * 
++ * The Original Code and all software distributed under the License are
++ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
++ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
++ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
++ * Please see the License for the specific language governing rights and
++ * limitations under the License.
++ * 
++ * @APPLE_LICENSE_HEADER_END@
++ */
++
++/* 
++ * DER_Decode.h - DER decoding routines
++ */
++ 
++#ifndef	_DER_DECODE_H_
++#define _DER_DECODE_H_
++
++#include <libDER/libDER_config.h>
++#include <libDER/libDER.h>
++
++__BEGIN_DECLS
++
++/*
++ * Decoding one item consists of extracting its tag, a pointer
++ * to the actual content, and the length of the content. Those
++ * three are represented by a DERDecodedInfo.
++ */
++typedef struct {
++	DERTag		tag;
++	DERItem		content;
++} DERDecodedInfo;
++
++/*
++ * Basic decoding primitive. Only works with:
++ *
++ *  -- definite length encoding 
++ *  -- one-byte tags 
++ *  -- max content length fits in a DERSize
++ *
++ * No malloc or copy of the contents is performed; the returned 
++ * content->content.data is a pointer into the incoming der data.
++ */
++DERReturn DERDecodeItem(
++	const DERItem	*der,			/* data to decode */
++	DERDecodedInfo	*decoded);		/* RETURNED */
++
++/*
++ *  Basic decoding primitive. Allows for decoding with a partial buffer.
++ *  if allowPartialBuffer is true. A partial buffer would normally fail
++ *  because the encoded length would be greater than the size of the buffer passed in.
++ *  Only works with:
++ *
++ *  -- definite length encoding
++ *  -- one-byte tags (unless DER_MULTIBYTE_TAGS is defined)
++ *  -- max content length fits in a DERSize
++ *
++ * No malloc or copy of the contents is performed; the returned
++ * content->content.data is a pointer into the incoming der data.
++ *
++ * WARNING: Using a partial buffer can return a DERDecodedInfo object with
++ * a length larger than the buffer.  It is recommended to instead use
++ * DERDecodeItemPartialBufferGetLength if you need partial buffers.
++ *
++ */
++DER_bounds_safety_replaced(DERDecodeItemPartialBufferGetLength)
++DERReturn DERDecodeItemPartialBuffer(
++    const DERItem        *der,                        /* data to decode */
++    DERDecodedInfo        *decoded,       /* RETURNED */
++    DERBool allowPartialBuffer);
++
++/*
++ * Same as above, but returns a DERDecodedInfo with a length no larger than the buffer.
++ * The actual encoded length can be retrieved from encodedLength parameter.
++ * encodedLength can be NULL to achieve the same behavior as DERDecodeItemPartialBuffer,
++ * with allowPartialBuffer=false
++ *
++ * NOTE: The DERDecoded length will never be larger than the input buffer.
++ * This is a key difference from DERDecodeItemPartialBuffer which could return invalid length.
++ *
++ */
++DERReturn DERDecodeItemPartialBufferGetLength(
++    const DERItem	*der,			/* data to decode */
++    DERDecodedInfo	*decoded,       /* RETURNED */
++    DERSize         *encodedLength);
++
++/* 
++ * Given a BIT_STRING, in the form of its raw content bytes, 
++ * obtain the number of unused bits and the raw bit string bytes.
++ */
++DERReturn DERParseBitString(
++	const DERItem	*contents,
++	DERItem			*bitStringBytes,	/* RETURNED */
++	DERByte			*numUnusedBits);	/* RETURNED */
++
++/* 
++ * Given a BOOLEAN, in the form of its raw content bytes, 
++ * obtain it's value.
++ */
++DERReturn DERParseBoolean(
++    const DERItem	*contents,
++    DERBool			*value);	/* RETURNED */
++
++DERReturn DERParseBooleanWithDefault(
++    const DERItem	*contents,
++    DERBool			defaultValue,
++    DERBool			*value);	/* RETURNED */
++/*
++ * Given a positive INTEGER, in the form of its raw content bytes,
++ * obtain it's value as a 32 bit or 64 bit quantity.
++ * Returns DR_BufOverflow if the value is too large to fit in the return type
++ */
++
++DERReturn DERParseInteger(
++	const DERItem	*contents,
++	DERInt          *value);	/* RETURNED */
++
++DERReturn DERParseInteger64(
++    const DERItem   *contents,
++    DERLong         *value);        /* RETURNED */
++
++DERReturn DERParseIntegerSigned(
++    const DERItem   *contents,
++    DERSignedInt    *value);        /* RETURNED */
++
++DERReturn DERParseInteger64Signed(
++    const DERItem   *contents,
++    DERSignedLong   *value);        /* RETURNED */
++
++/* 
++ * Sequence/set decode support.
++ */
++ 
++/* state representing a sequence or set being decoded */
++typedef struct {
++	DERByte	*DER_ended_by(end) nextItem;
++	DERByte	*end;
++} DERSequence;
++
++/* 
++ * To decode a set or sequence, call DERDecodeSeqInit or
++ * DERDecodeSeqContentInit once, then call DERDecodeSeqNext to 
++ * get each enclosed item. 
++ *
++ * DERDecodeSeqNext returns DR_EndOfSequence when no more
++ * items are available. 
++ */
++ 
++/* 
++ * Use this to parse the top level sequence's tag and content length.
++ */
++DERReturn DERDecodeSeqInit(
++	const DERItem	*der,			/* data to decode */
++	DERTag			*tag,			/* RETURNED tag of sequence/set. This will be
++									 *    either ASN1_CONSTR_SEQUENCE or 
++									 *    ASN1_CONSTR_SET. */
++	DERSequence		*derSeq);		/* RETURNED, to use in DERDecodeSeqNext */
++	
++/* 
++ * Use this to start in on decoding a sequence's content, when 
++ * the top-level tag and content have already been decoded. 
++ */
++DERReturn DERDecodeSeqContentInit(
++	const DERItem	*content,
++	DERSequence		*derSeq);		/* RETURNED, to use in DERDecodeSeqNext */
++
++//getting rid of the attribute
++#if defined(_MSC_VER)
++#define __attribute__(x)
++#endif
++
++/* obtain the next decoded item in a sequence or set */
++__attribute__((warn_unused_result)) DERReturn DERDecodeSeqNext(
++	DERSequence		*derSeq,
++	DERDecodedInfo	*decoded);		/* RETURNED */
++	
++/*
++ * High level sequence decode.
++ */
++#if __BLOCKS__
++/* Decode a sequence or set using a code block on each subitem.
++ * This function implements the oft-repeated while(DERDecodeSeqNext == DR_Success) pattern.
++ * To stop decoding, set stop to true. If an error (that should cause a stop) occurs, return a non-success status.
++ */
++#if !defined(_MSC_VER)
++DERReturn DERDecodeSequenceWithBlock(const DERItem *der, DERReturn (^operation)(DERDecodedInfo *content, bool *stop));
++#else
++DERReturn DERDecodeSequenceWithBlock(const DERItem* der, DERReturn (*operation)(DERDecodedInfo* content, bool* stop));
++#endif
++
++/* Decode sequence or set content using a code block on each subitem.
++ * This function implements the oft-repeated while(DERDecodeSeqNext == DR_Success) pattern.
++ * To stop decoding, set stop to true. If an error (that should cause a stop) occurs, return a non-success status.
++ */
++#if !defined(_MSC_VER)
++DERReturn DERDecodeSequenceContentWithBlock(const DERItem *der, DERReturn (^operation)(DERDecodedInfo *content, bool *stop));
++#else
++DERReturn DERDecodeSequenceContentWithBlock(const DERItem* der, DERReturn(*operation)(DERDecodedInfo* content, bool* stop));
++#endif
++#endif // __BLOCKS__
++
++/* 
++ * Per-item decode options.
++ */
++ 
++/* Explicit default, no options */
++#define DER_DEC_NO_OPTS		0x0000
++
++/* This item optional, can be skipped during decode */
++#define DER_DEC_OPTIONAL	0x0001	
++
++/* Skip the tag check; accept anything. */
++#define DER_DEC_ASN_ANY		0x0002	
++
++/* Skip item, no write to DERDecodedInfo (but tag check still performed) */
++#define DER_DEC_SKIP		0x0004		
++
++/* Save full DER encoding in DERDecodedInfo, including tag and length. Normally
++ * only the content is saved. */
++#define DER_DEC_SAVE_DER	0x0008
++
++/* 
++ * High level sequence parse, starting with top-level tag and content.
++ * Top level tag must be ASN1_CONSTR_SEQUENCE - if it's not, and that's 
++ * OK, use DERParseSequenceContent().
++ *
++ * These never return DR_EndOfSequence - if an *unexpected* end of sequence
++ * occurs, return DR_IncompleteSeq.
++ *
++ * Results of the decoding of one item are placed in a DERItem whose address 
++ * is the dest arg plus the offset value in the associated DERItemSpec. 
++ *
++ * Items which are optional (DER_DEC_OPTIONAL) and which are not found, 
++ * leave their associated DERDecodedInfos unmodified.
++ *
++ * Processing of a sequence ends on detection of any error or after the
++ * last DERItemSpec is processed. 
++ *
++ * The sizeToZero argument, if nonzero, indicates the number of bytes
++ * starting at dest to zero before processing the sequence. This is 
++ * generally desirable, particularly if there are any DER_DEC_OPTIONAL
++ * items in the sequence; skipped optional items are detected by the 
++ * caller via a NULL DERDecodedInfo.content.data; if this hasn't been
++ * explicitly zeroed (generally, by passing a nonzero value of sizeToZero),
++ * skipped items can't be detected. 
++ */
++DERReturn DERParseSequenceToObject(
++    const DERItem			*der,
++    DERShort				numItems,						/* size of itemSpecs[] */
++    const DERItemSpec		*DER_counted_by(numItems) itemSpecs,
++    void					*DER_sized_by(destSize) dest,	/* DERDecodedInfo(s) here RETURNED */
++    DERSize					destSize,
++    DERSize					sizeToZero);					/* optional */
++    
++/* same as DERParseSequenceToObject, but without a destination size */
++DER_bounds_safety_replaced(DERParseSequenceToObject)
++DERReturn DERParseSequence(
++	const DERItem			*der,
++	DERShort				numItems,	    			/* size of itemSpecs[] */
++	const DERItemSpec		*DER_counted_by(numItems) itemSpecs,
++	void					*DER_unsafe_indexable dest,	/* DERDecodedInfo(s) here RETURNED */
++	DERSize					sizeToZero);				/* optional */
++
++	
++/* high level sequence parse, starting with sequence's content */
++DERReturn DERParseSequenceContentToObject(
++	const DERItem			*content,
++	DERShort				numItems,						/* size of itemSpecs[] */
++	const DERItemSpec		*DER_counted_by(numItems) itemSpecs,
++	void					*DER_sized_by(destSize) dest,	/* DERDecodedInfo(s) here RETURNED */
++	DERSize					destSize,
++	DERSize					sizeToZero);					/* optional */
++
++/* same as DERParseSequenceContentToObject, but without a destination size */
++DER_bounds_safety_replaced(DERParseSequenceContentToObject)
++DERReturn DERParseSequenceContent(
++	const DERItem			*content,
++	DERShort				numItems,					/* size of itemSpecs[] */
++	const DERItemSpec		*DER_counted_by(numItems) itemSpecs,
++	void					*DER_unsafe_indexable dest,	/* DERDecodedInfo(s) here RETURNED */
++	DERSize					sizeToZero);				/* optional */
++
++__END_DECLS
++
++#endif	/* _DER_DECODE_H_ */
++
+diff --git a/EXTERNAL_HEADERS/libDER/DER_Digest.h b/EXTERNAL_HEADERS/libDER/DER_Digest.h
+new file mode 100644
+index 00000000..a84c502d
+--- /dev/null
++++ b/EXTERNAL_HEADERS/libDER/DER_Digest.h
+@@ -0,0 +1,115 @@
++/*
++ * Copyright (c) 2005-2016 Apple Inc. All Rights Reserved.
++ *
++ * @APPLE_LICENSE_HEADER_START@
++ * 
++ * This file contains Original Code and/or Modifications of Original Code
++ * as defined in and that are subject to the Apple Public Source License
++ * Version 2.0 (the 'License'). You may not use this file except in
++ * compliance with the License. Please obtain a copy of the License at
++ * http://www.opensource.apple.com/apsl/ and read it before using this
++ * file.
++ * 
++ * The Original Code and all software distributed under the License are
++ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
++ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
++ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
++ * Please see the License for the specific language governing rights and
++ * limitations under the License.
++ * 
++ * @APPLE_LICENSE_HEADER_END@
++ */
++
++
++/*
++ * DER_Digest.h - DER encode a DigestInfo
++ *
++ */
++
++#ifndef	_DER_DIGEST_H_
++#define _DER_DIGEST_H_
++
++#include <libDER/libDER_config.h>
++#include <libDER/libDER.h>
++
++__BEGIN_DECLS
++
++/* 
++ * Create an encoded DigestInfo based on the specified SHA1 digest. 
++ * The incoming digest must be 20 bytes long. 
++ *
++ * Result is placed in caller's buffer, which must be at least of
++ * length DER_SHA1_DIGEST_INFO_LEN bytes. 
++ *
++ * The *resultLen parameter is the available size in the result
++ * buffer on input, and the actual length of the encoded DigestInfo 
++ * on output. 
++ */
++#define DER_SHA1_DIGEST_LEN			20
++#define DER_SHA1_DIGEST_INFO_LEN	35 
++	
++DERReturn DEREncodeSHA1DigestInfoSized(
++	const DERByte	*DER_counted_by(sha1DigestLen) sha1Digest,
++	DERSize			sha1DigestLen,
++	DERByte			*DER_counted_by(*resultLen) result,	/* encoded result RETURNED here */
++	DERSize			inputLen,
++	DERSize			*resultLen);	/* OUT */
++
++DERReturn DEREncodeSHA1DigestInfo(
++	const DERByte	*DER_counted_by(sha1DigestLen) sha1Digest,
++	DERSize			sha1DigestLen,
++	DERByte			*DER_counted_by(*resultLen) result,	/* encoded result RETURNED here */
++	DERSize			*resultLen);	/* IN/OUT */
++
++
++#define DER_SHA256_DIGEST_LEN		32
++#define DER_SHA256_DIGEST_INFO_LEN	51 
++
++DERReturn DEREncodeSHA256DigestInfoSized(
++	const DERByte	*DER_counted_by(sha256DigestLen) sha256Digest,
++	DERSize			sha256DigestLen,
++	DERByte			*DER_counted_by(*resultLen) result,		/* encoded result RETURNED here */
++	DERSize			inputLen,
++	DERSize			*resultLen);	/* OUT */
++
++DERReturn DEREncodeSHA256DigestInfo(
++	const DERByte	*DER_counted_by(sha256DigestLen) sha256Digest,
++	DERSize			sha256DigestLen,
++	DERByte			*DER_counted_by(*resultLen) result,		/* encoded result RETURNED here */
++	DERSize			*resultLen);	/* IN/OUT */
++
++/*
++ * Likewise, create an encoded DIgestInfo for specified MD5 or MD2 digest. 
++ */
++#define DER_MD_DIGEST_LEN			16
++#define DER_MD_DIGEST_INFO_LEN		34 
++
++typedef enum {
++	WD_MD2 = 1,
++	WD_MD5 = 2
++} WhichDigest;
++
++DERReturn DEREncodeMDDigestInfoSized(
++	WhichDigest		whichDigest,
++	const DERByte	*DER_counted_by(mdDigestLen) mdDigest,
++	DERSize			mdDigestLen,
++	DERByte			*DER_counted_by(*resultLen) result,		/* encoded result RETURNED here */
++	DERSize			inputLen,
++	DERSize			*resultLen);	/* OUT */
++
++DERReturn DEREncodeMDDigestInfo(
++	WhichDigest		whichDigest,
++	const DERByte	*DER_counted_by(mdDigestLen) mdDigest,
++	DERSize			mdDigestLen,
++	DERByte			*DER_counted_by(*resultLen) result,		/* encoded result RETURNED here */
++	DERSize			*resultLen);	/* IN/OUT */
++
++/* max sizes you'll need in the general cases */
++#define DER_MAX_DIGEST_LEN			DER_SHA256_DIGEST_LEN
++#define DER_MAX_ENCODED_INFO_LEN	DER_SHA256_DIGEST_INFO_LEN
++
++__END_DECLS
++
++#endif	/* _DER_DIGEST_H_ */
++
+diff --git a/EXTERNAL_HEADERS/libDER/DER_Encode.h b/EXTERNAL_HEADERS/libDER/DER_Encode.h
+new file mode 100644
+index 00000000..a6750528
+--- /dev/null
++++ b/EXTERNAL_HEADERS/libDER/DER_Encode.h
+@@ -0,0 +1,161 @@
++/*
++ * Copyright (c) 2005-2016 Apple Inc. All Rights Reserved.
++ *
++ * @APPLE_LICENSE_HEADER_START@
++ * 
++ * This file contains Original Code and/or Modifications of Original Code
++ * as defined in and that are subject to the Apple Public Source License
++ * Version 2.0 (the 'License'). You may not use this file except in
++ * compliance with the License. Please obtain a copy of the License at
++ * http://www.opensource.apple.com/apsl/ and read it before using this
++ * file.
++ * 
++ * The Original Code and all software distributed under the License are
++ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
++ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
++ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
++ * Please see the License for the specific language governing rights and
++ * limitations under the License.
++ * 
++ * @APPLE_LICENSE_HEADER_END@
++ */
++
++
++/*
++ * DER_Encode.h - DER encoding routines
++ *
++ */
++
++#ifndef	_DER_ENCODE_H_
++#define _DER_ENCODE_H_
++
++#include <libDER/libDER_config.h>
++#include <libDER/libDER.h>
++
++__BEGIN_DECLS
++
++/*
++ * Max size of an encoded item given its length.
++ * This includes a possible leading zero prepended to a signed integer
++ * (see DER_ENC_SIGNED_INT below).
++ */
++#define DER_MAX_ENCODED_SIZE(len)					\
++	( 1 +			/* tag */						\
++	  5 +			/* max length */				\
++	  1 +			/* possible prepended zero */	\
++	  len)
++
++/* calculate size of encoded length */
++DERSize DERLengthOfLength(
++	DERSize length);
++
++/* encode length */
++DERReturn DEREncodeLength(
++	DERSize length,
++	DERByte *DER_counted_by(*inOutLen) buf,		/* encoded length goes here */
++	DERSize *inOutLen);	/* IN/OUT */
++
++DERReturn DEREncodeLengthSized(
++	DERSize length,
++	DERByte *DER_counted_by(*outLen) buf,		/* encoded length goes here */
++	DERSize	inLen,
++	DERSize *outLen);
++
++/* calculate size of encoded length */
++DERSize DERLengthOfItem(
++	DERTag tag,
++	DERSize length);
++
++/* encode item */
++DERReturn DEREncodeItem(
++	DERTag tag,
++	DERSize length,
++    const DERByte *DER_counted_by(length) src,
++	DERByte *DER_counted_by(*inOutLen) derOut,	/* encoded item goes here */
++	DERSize *inOutLen);	/* IN/OUT */
++	
++DERReturn DEREncodeItemSized(
++	DERTag tag,
++	DERSize length,
++    const DERByte *DER_counted_by(length) src,
++	DERByte *DER_counted_by(*outLen) derOut,	/* encoded item goes here */
++	DERSize inLen,
++	DERSize *outLen);
++
++/*
++ * Per-item encode options.
++ */
++
++/* explicit default, no options */
++#define DER_ENC_NO_OPTS			0x0000
++
++/* signed integer check: if incoming m.s. bit is 1, prepend a zero */
++#define DER_ENC_SIGNED_INT		0x0100
++
++/* DERItem contains fully encoded item - copy, don't encode */
++#define DER_ENC_WRITE_DER		0x0200
++
++
++/*
++ * High-level sequence or set encode support.
++ *
++ * The outgoing sequence is expressed as an array of DERItemSpecs, each
++ * of which corresponds to one item in the encoded sequence.
++ *
++ * Normally the tag of the encoded item comes from the associated
++ * DERItemSpec, and the content comes from the DERItem whose address is
++ * the src arg plus the offset value in the associated DERItemSpec.
++ *
++ * If the DER_ENC_WRITE_DER option is true for a given DERItemSpec then
++ * no per-item encoding is done; the DER - with tag, length, and content -
++ * is taken en masse from the associated DERItem.
++ */
++DERReturn DEREncodeSequenceFromObject(
++	DERTag				topTag,						/* ASN1_CONSTR_SEQUENCE, ASN1_CONSTR_SET */
++	const void			*DER_sized_by(srcSize) src,	/* generally a ptr to a struct full of
++													 *    DERItems */
++	DERSize				srcSize,
++	DERShort			numItems,					/* size of itemSpecs[] */
++	const DERItemSpec	*DER_counted_by(numItems) itemSpecs,
++	DERByte				*DER_counted_by(*outLen) derOut,	/* encoded data written here */
++	DERSize				inLen,
++	DERSize				*outLen);					/* OUT */
++
++/* same as DEREncodeSequenceFromObject, but without a source size */
++DER_bounds_safety_replaced(DEREncodeSequenceFromObject)
++DERReturn DEREncodeSequence(
++	DERTag				topTag,						/* ASN1_CONSTR_SEQUENCE, ASN1_CONSTR_SET */
++	const void			*DER_unsafe_indexable src,	/* generally a ptr to a struct full of
++									 				 *    DERItems */
++	DERShort			numItems,					/* size of itemSpecs[] */
++	const DERItemSpec	*DER_counted_by(numItems) itemSpecs,
++	DERByte				*DER_counted_by(*inOutLen) derOut,	/* encoded data written here */
++	DERSize				*inOutLen);					/* IN/OUT */
++
++
++/* precalculate the length of an encoded sequence: can return an error for overflow, and
++ * returns its result by argument */
++DERReturn DERLengthOfEncodedSequenceFromObject(
++	DERTag				topTag,							/* ASN1_CONSTR_SEQUENCE, ASN1_CONSTR_SET */
++	const void			*DER_sized_by(srcSize) src,		/* generally a ptr to a struct full of
++														 *    DERItems */
++	DERSize				srcSize,
++	DERShort			numItems,						/* size of itemSpecs[] */
++	const DERItemSpec	*DER_counted_by(numItems) itemSpecs,
++	DERSize				*result);
++	
++/* same, but without a source size, and without a chance to report errors: returns 0 if
++ * the size can't possibly be valid for this pointer */
++DER_bounds_safety_replaced(DERLengthOfEncodedSequenceFromObject)
++DERSize DERLengthOfEncodedSequence(
++	DERTag				topTag,							/* ASN1_CONSTR_SEQUENCE, ASN1_CONSTR_SET */
++	const void			*DER_unsafe_indexable src,		/* generally a ptr to a struct full of
++														 *    DERItems */
++	DERShort			numItems,						/* size of itemSpecs[] */
++	const DERItemSpec	*DER_counted_by(numItems) itemSpecs);
++
++
++__END_DECLS
++
++#endif	/* _DER_ENCODE_H_ */
+diff --git a/EXTERNAL_HEADERS/libDER/DER_Keys.h b/EXTERNAL_HEADERS/libDER/DER_Keys.h
+new file mode 100644
+index 00000000..06fb8473
+--- /dev/null
++++ b/EXTERNAL_HEADERS/libDER/DER_Keys.h
+@@ -0,0 +1,122 @@
++/*
++ * Copyright (c) 2005-2016 Apple Inc. All Rights Reserved.
++ *
++ * @APPLE_LICENSE_HEADER_START@
++ * 
++ * This file contains Original Code and/or Modifications of Original Code
++ * as defined in and that are subject to the Apple Public Source License
++ * Version 2.0 (the 'License'). You may not use this file except in
++ * compliance with the License. Please obtain a copy of the License at
++ * http://www.opensource.apple.com/apsl/ and read it before using this
++ * file.
++ * 
++ * The Original Code and all software distributed under the License are
++ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
++ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
++ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
++ * Please see the License for the specific language governing rights and
++ * limitations under the License.
++ * 
++ * @APPLE_LICENSE_HEADER_END@
++ */
++
++
++/*
++ * DER_Keys.h - support for decoding RSA keys
++ *
++ */
++ 
++#ifndef	_DER_KEYS_H_
++#define _DER_KEYS_H_
++
++#include <libDER/libDER_config.h>
++#include <libDER/libDER.h>
++#include <libDER/DER_Decode.h>
++
++__BEGIN_DECLS
++
++/* Algorithm Identifier components */
++typedef struct {
++	DERItem		oid;			/* OID */
++	DERItem		params;			/* ASN_ANY, optional, DER_DEC_SAVE_DER */
++} DERAlgorithmId;
++
++/* DERItemSpecs to decode into a DERAlgorithmId */
++extern const DERSize DERNumAlgorithmIdItemSpecs;
++extern const DERItemSpec DERAlgorithmIdItemSpecs[DER_counted_by(DERNumAlgorithmIdItemSpecs)];
++
++/* X509 SubjectPublicKeyInfo */
++typedef struct {
++	DERItem		algId;			/* sequence, DERAlgorithmId */
++	DERItem		pubKey;			/* BIT STRING */
++} DERSubjPubKeyInfo;
++
++/* DERItemSpecs to decode into a DERSubjPubKeyInfo */
++extern const DERSize DERNumSubjPubKeyInfoItemSpecs;
++extern const DERItemSpec DERSubjPubKeyInfoItemSpecs[DER_counted_by(DERNumSubjPubKeyInfoItemSpecs)];
++
++/* 
++ * RSA public key in PKCS1 format; this is inside the BIT_STRING in 
++ * DERSubjPubKeyInfo.pubKey.
++ */
++typedef struct {
++	DERItem		modulus;		/* n - INTEGER */
++	DERItem		pubExponent;	/* e - INTEGER */
++} DERRSAPubKeyPKCS1;
++
++/* DERItemSpecs to decode/encode into/from a DERRSAPubKeyPKCS1 */
++extern const DERSize DERNumRSAPubKeyPKCS1ItemSpecs;
++extern const DERItemSpec DERRSAPubKeyPKCS1ItemSpecs[DER_counted_by(DERNumRSAPubKeyPKCS1ItemSpecs)];
++
++/* 
++ * RSA public key in custom (to this library) format, including
++ * the reciprocal. All fields are integers. 
++ */
++typedef struct {
++	DERItem		modulus;		/* n */
++	DERItem		reciprocal;		/* reciprocal of modulus */
++	DERItem		pubExponent;	/* e */
++} DERRSAPubKeyApple;
++
++/* DERItemSpecs to decode/encode into/from a DERRSAPubKeyApple */
++extern const DERSize DERNumRSAPubKeyAppleItemSpecs;
++extern const DERItemSpec DERRSAPubKeyAppleItemSpecs[DER_counted_by(DERNumRSAPubKeyAppleItemSpecs)];
++
++/* 
++ * RSA Private key, PKCS1 format, CRT option.
++ * All fields are integers. 
++ */
++typedef struct {
++	DERItem		p;				/* p * q = n */
++	DERItem		q;
++	DERItem		dp;				/* d mod (p-1) */
++	DERItem		dq;				/* d mod (q-1) */
++	DERItem		qInv;		
++} DERRSAPrivKeyCRT;
++
++/* DERItemSpecs to decode into a DERRSAPrivKeyCRT */
++extern const DERSize DERNumRSAPrivKeyCRTItemSpecs;
++extern const DERItemSpec DERRSAPrivKeyCRTItemSpecs[DER_counted_by(DERNumRSAPrivKeyCRTItemSpecs)];
++
++/* Fully formed RSA key pair, for generating a PKCS1 private key */
++typedef struct {
++	DERItem		version;	
++	DERItem		n;		/* modulus */
++	DERItem		e;		/* public exponent */
++	DERItem		d;		/* private exponent */
++	DERItem		p;		/* n = p*q */
++	DERItem		q;
++	DERItem		dp;		/* d mod (p-1) */
++	DERItem		dq;		/* d mod (q-1) */
++	DERItem		qInv;	/* q^(-1) mod p */
++} DERRSAKeyPair;
++
++/* DERItemSpecs to encode a DERRSAKeyPair */
++extern const DERSize DERNumRSAKeyPairItemSpecs;
++extern const DERItemSpec DERRSAKeyPairItemSpecs[DER_counted_by(DERNumRSAKeyPairItemSpecs)];
++
++__END_DECLS
++
++#endif	/* _DER_KEYS_H_ */
++
+diff --git a/EXTERNAL_HEADERS/libDER/asn1Types.h b/EXTERNAL_HEADERS/libDER/asn1Types.h
+new file mode 100644
+index 00000000..17728ac5
+--- /dev/null
++++ b/EXTERNAL_HEADERS/libDER/asn1Types.h
+@@ -0,0 +1,110 @@
++/*
++ * Copyright (c) 2005-2016 Apple Inc. All Rights Reserved.
++ *
++ * @APPLE_LICENSE_HEADER_START@
++ *
++ * This file contains Original Code and/or Modifications of Original Code
++ * as defined in and that are subject to the Apple Public Source License
++ * Version 2.0 (the 'License'). You may not use this file except in
++ * compliance with the License. Please obtain a copy of the License at
++ * http://www.opensource.apple.com/apsl/ and read it before using this
++ * file.
++ *
++ * The Original Code and all software distributed under the License are
++ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
++ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
++ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
++ * Please see the License for the specific language governing rights and
++ * limitations under the License.
++ *
++ * @APPLE_LICENSE_HEADER_END@
++ */
++
++
++/*
++ * asn1Types.h - ASN.1/DER #defines - strictly hard coded per the real world
++ *
++ */
++
++#ifndef	_ASN1_TYPES_H_
++#define _ASN1_TYPES_H_
++
++#include <libDER/libDER_config.h>
++
++__BEGIN_DECLS
++
++/* copied from libsecurity_asn1 project */
++
++/* Type tag numbers */
++#define ASN1_EOC                0x00
++#define ASN1_BOOLEAN            0x01
++#define ASN1_INTEGER            0x02
++#define ASN1_BIT_STRING         0x03
++#define ASN1_OCTET_STRING       0x04
++#define ASN1_NULL               0x05
++#define ASN1_OBJECT_ID          0x06
++#define ASN1_OBJECT_DESCRIPTOR  0x07
++/* External type and instance-of type   0x08 */
++#define ASN1_REAL               0x09
++#define ASN1_ENUMERATED         0x0a
++#define ASN1_EMBEDDED_PDV       0x0b
++#define ASN1_UTF8_STRING        0x0c
++/*                                  0x0d */
++/*                                  0x0e */
++/*                                  0x0f */
++#define ASN1_SEQUENCE           0x10
++#define ASN1_SET                0x11
++#define ASN1_NUMERIC_STRING     0x12
++#define ASN1_PRINTABLE_STRING   0x13
++#define ASN1_T61_STRING         0x14
++#define ASN1_VIDEOTEX_STRING    0x15
++#define ASN1_IA5_STRING         0x16
++#define ASN1_UTC_TIME           0x17
++#define ASN1_GENERALIZED_TIME   0x18
++#define ASN1_GRAPHIC_STRING     0x19
++#define ASN1_VISIBLE_STRING     0x1a
++#define ASN1_GENERAL_STRING     0x1b
++#define ASN1_UNIVERSAL_STRING   0x1c
++/*                                  0x1d */
++#define ASN1_BMP_STRING         0x1e
++#define ASN1_HIGH_TAG_NUMBER    0x1f
++#define ASN1_TELETEX_STRING ASN1_T61_STRING
++
++/* Tag modifiers */
++#define ASN1_TAG_MASK           ((DERTag)~0)
++#define ASN1_TAGNUM_MASK        ((DERTag)~((DERTag)7 << (sizeof(DERTag) * 8 - 3)))
++
++#define ASN1_METHOD_MASK        ((DERTag)1 << (sizeof(DERTag) * 8 - 3))
++#define ASN1_PRIMITIVE          ((DERTag)0 << (sizeof(DERTag) * 8 - 3))
++#define ASN1_CONSTRUCTED        ((DERTag)1 << (sizeof(DERTag) * 8 - 3))
++
++#define ASN1_CLASS_MASK         ((DERTag)3 << (sizeof(DERTag) * 8 - 2))
++#define ASN1_UNIVERSAL          ((DERTag)0 << (sizeof(DERTag) * 8 - 2))
++#define ASN1_APPLICATION        ((DERTag)1 << (sizeof(DERTag) * 8 - 2))
++#define ASN1_CONTEXT_SPECIFIC   ((DERTag)2 << (sizeof(DERTag) * 8 - 2))
++#define ASN1_PRIVATE            ((DERTag)3 << (sizeof(DERTag) * 8 - 2))
++
++/* One-byte tag modifiers */
++#define ONE_BYTE_ASN1_TAG_MASK          0xff
++#define ONE_BYTE_ASN1_TAGNUM_MASK       0x1f
++#define ONE_BYTE_ASN1_METHOD_MASK       0x20
++#define ONE_BYTE_ASN1_PRIMITIVE         0x00
++#define ONE_BYTE_ASN1_CONSTRUCTED       0x20
++
++#define ONE_BYTE_ASN1_CLASS_MASK        0xc0
++#define ONE_BYTE_ASN1_UNIVERSAL         0x00
++#define ONE_BYTE_ASN1_APPLICATION       0x40
++#define ONE_BYTE_ASN1_CONTEXT_SPECIFIC  0x80
++#define ONE_BYTE_ASN1_PRIVATE           0xc0
++
++/* sequence and set appear as the following */
++#define ASN1_CONSTR_SEQUENCE    ((DERTag)(ASN1_CONSTRUCTED | ASN1_SEQUENCE))
++#define ASN1_CONSTR_SET         ((DERTag)(ASN1_CONSTRUCTED | ASN1_SET))
++
++#define ONE_BYTE_ASN1_CONSTR_SEQUENCE   ((uint8_t)(ONE_BYTE_ASN1_CONSTRUCTED | ASN1_SEQUENCE))
++#define ONE_BYTE_ASN1_CONSTR_SET        ((uint8_t)(ONE_BYTE_ASN1_CONSTRUCTED | ASN1_SET))
++
++__END_DECLS
++
++#endif	/* _ASN1_TYPES_H_ */
+diff --git a/EXTERNAL_HEADERS/libDER/libDER.h b/EXTERNAL_HEADERS/libDER/libDER.h
+new file mode 100644
+index 00000000..f426a923
+--- /dev/null
++++ b/EXTERNAL_HEADERS/libDER/libDER.h
+@@ -0,0 +1,81 @@
++/*
++ * Copyright (c) 2005-2016 Apple Inc. All Rights Reserved.
++ *
++ * @APPLE_LICENSE_HEADER_START@
++ * 
++ * This file contains Original Code and/or Modifications of Original Code
++ * as defined in and that are subject to the Apple Public Source License
++ * Version 2.0 (the 'License'). You may not use this file except in
++ * compliance with the License. Please obtain a copy of the License at
++ * http://www.opensource.apple.com/apsl/ and read it before using this
++ * file.
++ * 
++ * The Original Code and all software distributed under the License are
++ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
++ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
++ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
++ * Please see the License for the specific language governing rights and
++ * limitations under the License.
++ * 
++ * @APPLE_LICENSE_HEADER_END@
++ */
++
++
++/*
++ * libDER.h - main header for libDER, a ROM-capable DER decoding library. 
++ *
++ */
++ 
++#ifndef	_LIB_DER_H_
++#define _LIB_DER_H_
++
++#include <libDER/libDER_config.h>
++#include <libDER/DERItem.h>
++
++__BEGIN_DECLS
++
++/*
++ * Error returns generated by this library.
++ */
++typedef enum {
++    DR_GenericErr = -1,
++    DR_Success = 0,
++    DR_EndOfSequence,	/* end of sequence or set */
++    DR_UnexpectedTag,	/* unexpected tag found while decoding */
++    DR_DecodeError,		/* misc. decoding error (badly formatted DER) */
++    DR_Unimplemented,	/* function not implemented in this configuration */
++    DR_IncompleteSeq,	/* incomplete sequence */
++    DR_ParamErr,		/* incoming parameter error */
++    DR_BufOverflow		/* buffer overflow */
++    /* etc. */
++} DERReturn;
++
++/* 
++ * The structure of a sequence during decode or encode is expressed as 
++ * an array of DERItemSpecs. While decoding or encoding a sequence, 
++ * each item in the sequence corresponds to one DERItemSpec.
++ */
++typedef struct {
++	DERSize			offset;			/* offset of destination DERItem */
++	DERTag			tag;			/* DER tag */
++	DERShort		options;		/* DER_DEC_xxx or DER_ENC_xxx */
++} DERItemSpec;
++
++/*
++ * Macro to obtain offset of a DERDecodedInfo within a struct.
++ * FIXME this is going to need reworking to avoid compiler warnings
++ * on 64-bit compiles. It'll work OK as long as an offset can't be larger
++ * than a DERSize, but the cast from a pointer to a DERSize may 
++ * provoke compiler warnings. 
++ */
++#if defined(WIN32) || defined(_MSC_VER)
++#define DER_OFFSET(type, field) ((DERSize)(&((type *)0)->field))
++#else
++#define DER_OFFSET(type, field) (DERSize)__builtin_offsetof(type,field)
++#endif
++
++__END_DECLS
++
++#endif	/* _LIB_DER_H_ */
++
+diff --git a/EXTERNAL_HEADERS/libDER/libDER_config.h b/EXTERNAL_HEADERS/libDER/libDER_config.h
+new file mode 100644
+index 00000000..96a928cb
+--- /dev/null
++++ b/EXTERNAL_HEADERS/libDER/libDER_config.h
+@@ -0,0 +1,188 @@
++/*
++ * Copyright (c) 2005-2007,2011-2012,2014 Apple Inc. All Rights Reserved.
++ *
++ * @APPLE_LICENSE_HEADER_START@
++ * 
++ * This file contains Original Code and/or Modifications of Original Code
++ * as defined in and that are subject to the Apple Public Source License
++ * Version 2.0 (the 'License'). You may not use this file except in
++ * compliance with the License. Please obtain a copy of the License at
++ * http://www.opensource.apple.com/apsl/ and read it before using this
++ * file.
++ * 
++ * The Original Code and all software distributed under the License are
++ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
++ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
++ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
++ * Please see the License for the specific language governing rights and
++ * limitations under the License.
++ * 
++ * @APPLE_LICENSE_HEADER_END@
++ */
++
++
++/*
++ * libDER_config.h - platform dependent #defines and typedefs for libDER
++ *
++ */
++ 
++#ifndef	_LIB_DER_CONFIG_H_
++#define _LIB_DER_CONFIG_H_
++
++#if !defined(EFI) || !EFI
++#include <stddef.h>
++#include <stdint.h>
++#include <string.h>
++#include <stdbool.h>
++
++#else // EFI
++// This requires $(SDKROOT)/usr/local/efi/include/Platform to be in your header
++// search path.
++#include <Apple/Common/Library/Include/EfiCompatibility.h>
++#endif
++
++#if (defined(EFI) && EFI) || defined(WIN32) || defined(_MSC_VER)
++#if defined(__cplusplus)
++#define __BEGIN_DECLS extern "C" {
++#define __END_DECLS }
++#else
++#define __BEGIN_DECLS
++#define __END_DECLS
++#endif
++#else
++#include <sys/cdefs.h>
++#endif
++
++__BEGIN_DECLS
++
++/*
++ * Basic data types: unsigned 8-bit integer, unsigned 32-bit integer
++ */
++#if !defined(EFI) || !EFI
++typedef uint8_t DERByte;
++typedef uint16_t DERShort;
++typedef uint32_t DERInt;
++typedef int32_t DERSignedInt;
++typedef uint64_t DERLong;
++typedef int64_t DERSignedLong;
++typedef size_t DERSize;
++typedef bool DERBool;
++#else
++typedef UINT8 DERByte;
++typedef UINT16 DERShort;
++typedef UINT32 DERInt;
++typedef INT32 DERSignedInt;
++typedef UINT64 DERLong;
++typedef INT64 DERSignedLong;
++typedef size_t DERSize;
++typedef BOOLEAN DERBool;
++#endif
++
++/* 
++ * Use these #defines of you have memset, memmove, and memcmp; else
++ * write your own equivalents.
++ */
++
++#if !defined(EFI) || !EFI
++#define DERMemset(ptr, c, len)		memset(ptr, c, len)
++#define DERMemmove(dst, src, len)	memmove(dst, src, len)
++#define DERMemcmp(b1, b2, len)		memcmp(b1, b2, len)
++#else
++void *DERMemset(void *b, int c, size_t len);
++void *DERMemmove(void *dst, const void *src, size_t len);
++int DERMemcmp(const void *s1, const void *s2, size_t n);
++#endif
++
++/***
++ *** Compile time options to trim size of the library. 
++ ***/
++ 
++/* enable general DER encode */
++#define DER_ENCODE_ENABLE		1
++
++/* enable general DER decode */
++#define DER_DECODE_ENABLE		1
++
++#ifndef DER_MULTIBYTE_TAGS
++/* enable multibyte tag support. */
++#define DER_MULTIBYTE_TAGS		1
++#endif
++
++#ifndef DER_TAG_SIZE
++/* Iff DER_MULTIBYTE_TAGS is 1 this is the sizeof(DERTag) in bytes. Note that
++   tags are still encoded and decoded from a minimally encoded DER
++   represantation.  This value maintains compatibility with libImg4Decode/Encode.  */
++#define DER_TAG_SIZE            8
++#endif
++
++/* bounds-safety defines */
++#if !defined(_MSC_VER) && __has_feature(bounds_attributes)
++
++#define DER_counted_by(x)		__attribute__((counted_by(x)))
++#define DER_sized_by(x)			__attribute__((sized_by(x)))
++#define DER_ended_by(x)         __attribute__((ended_by(x)))
++#define DER_bidi_indexable		__attribute__((bidi_indexable))
++#define DER_indexable			__attribute__((indexable))
++#define DER_single				__attribute__((single))
++#define DER_unsafe_indexable	__attribute__((unsafe_indexable))
++#define DER_unsafe_forge_bidi_indexable(P, S)	__builtin_unsafe_forge_bidi_indexable(P, S)
++
++/* For some prototype patterns that bounds-safety doesn't handle without
++ * compromise, we ask adopters to use a different entry point. The old
++ * entry point is marked unavailable _only_ in bounds-safety builds, since
++ * there's nothing wrong with it otherwise.
++ */
++#define DER_bounds_safety_replaced_platform(P, REP)    \
++    __attribute__((availability(P, unavailable, replacement=#REP)))
++
++#define DER_bounds_safety_replaced(REP) \
++    DER_bounds_safety_replaced_platform(macosx, REP) \
++    DER_bounds_safety_replaced_platform(ios, REP)
++
++#else // !__has_feature(bounds_attributes)
++
++#define DER_counted_by(x)
++#define DER_sized_by(x)
++#define DER_ended_by(x)
++#define DER_bidi_indexable
++#define DER_indexable
++#define DER_single
++#define DER_unsafe_indexable
++#define DER_unsafe_forge_bidi_indexable(P, S) (P)
++
++#define DER_bounds_safety_replaced(...)
++
++#endif // !__has_feature(bounds_attributes)
++
++/* ---------------------- Do not edit below this line ---------------------- */
++
++/*
++ * Logical representation of a tag (the encoded representation is always in
++ * the minimal number of bytes). The top 3 bits encode class and method
++ * The remaining bits encode the tag value.  To obtain smaller DERItemSpecs
++ * sizes, choose the smallest type that fits your needs.  Most standard ASN.1
++ * usage only needs single byte tags, but ocasionally custom applications
++ * require a larger tag namespace.
++ */
++#if DER_MULTIBYTE_TAGS
++
++#if DER_TAG_SIZE == 1
++typedef DERByte DERTag;
++#elif DER_TAG_SIZE == 2
++typedef DERShort DERTag;
++#elif DER_TAG_SIZE == 4
++typedef DERInt DERTag;
++#elif DER_TAG_SIZE == 8
++typedef DERLong DERTag;
++#else
++#error DER_TAG_SIZE invalid
++#endif
++
++#else /* DER_MULTIBYTE_TAGS */
++typedef DERByte DERTag;
++#endif /* !DER_MULTIBYTE_TAGS */
++
++__END_DECLS
++
++#endif	/* _LIB_DER_CONFIG_H_ */
+diff --git a/EXTERNAL_HEADERS/libDER/oids.h b/EXTERNAL_HEADERS/libDER/oids.h
+new file mode 100644
+index 00000000..a6ba6da8
+--- /dev/null
++++ b/EXTERNAL_HEADERS/libDER/oids.h
+@@ -0,0 +1,251 @@
++/*
++ * Copyright (c) 2005-2009,2011-2017 Apple Inc. All Rights Reserved.
++ *
++ * @APPLE_LICENSE_HEADER_START@
++ *
++ * This file contains Original Code and/or Modifications of Original Code
++ * as defined in and that are subject to the Apple Public Source License
++ * Version 2.0 (the 'License'). You may not use this file except in
++ * compliance with the License. Please obtain a copy of the License at
++ * http://www.opensource.apple.com/apsl/ and read it before using this
++ * file.
++ *
++ * The Original Code and all software distributed under the License are
++ * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
++ * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
++ * INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
++ * Please see the License for the specific language governing rights and
++ * limitations under the License.
++ *
++ * @APPLE_LICENSE_HEADER_END@
++ */
++
++
++/*
++ * oids.h - declaration of OID consts
++ *
++ */
++
++#ifndef	_LIB_DER_OIDS_H_
++#define _LIB_DER_OIDS_H_
++
++#include <libDER/libDER_config.h>
++#include <libDER/DERItem.h>
++
++__BEGIN_DECLS
++
++#define LIBDER_HAS_EDDSA 1
++#define LIBDER_HAS_QCSTATEMENTS 1
++
++/* Algorithm oids. */
++extern const DERItem
++    oidRsa,             /* PKCS1 RSA encryption, used to identify RSA keys */
++    oidMd2Rsa,          /* PKCS1 md2withRSAEncryption signature alg */
++    oidMd4Rsa,          /* PKCS1 md4withRSAEncryption signature alg */
++    oidMd5Rsa,          /* PKCS1 md5withRSAEncryption signature alg */
++    oidSha1Rsa,         /* PKCS1 sha1withRSAEncryption signature alg */
++    oidSha256Rsa,       /* PKCS1 sha256WithRSAEncryption signature alg */
++    oidSha384Rsa,       /* PKCS1 sha384WithRSAEncryption signature alg */
++    oidSha512Rsa,       /* PKCS1 sha512WithRSAEncryption signature alg */
++    oidSha224Rsa,       /* PKCS1 sha224WithRSAEncryption signature alg */
++    oidEcPubKey,        /* ECDH or ECDSA public key in a certificate */
++    oidSha1Ecdsa,       /* ECDSA with SHA1 signature alg */
++    oidSha224Ecdsa,     /* ECDSA with SHA224 signature alg */
++    oidSha256Ecdsa,     /* ECDSA with SHA256 signature alg */
++    oidSha384Ecdsa,     /* ECDSA with SHA384 signature alg */
++    oidSha512Ecdsa,     /* ECDSA with SHA512 signature alg */
++    oidSha1Dsa,         /* ANSI X9.57 DSA with SHA1 signature alg */
++    oidMd2,             /* OID_RSA_HASH 2 */
++    oidMd4,             /* OID_RSA_HASH 4 */
++    oidMd5,             /* OID_RSA_HASH 5 */
++    oidSha1,            /* OID_OIW_ALGORITHM 26 */
++    oidSha1DsaOIW,      /* OID_OIW_ALGORITHM 27 */
++    oidSha1DsaCommonOIW,/* OID_OIW_ALGORITHM 28 */
++    oidSha1RsaOIW,      /* OID_OIW_ALGORITHM 29 */
++    oidSha256,          /* OID_NIST_HASHALG 1 */
++    oidSha384,          /* OID_NIST_HASHALG 2 */
++    oidSha512,          /* OID_NIST_HASHALG 3 */
++    oidSha224,          /* OID_NIST_HASHALG 4 */
++    oidFee,             /* APPLE_ALG_OID 1 */
++    oidMd5Fee,          /* APPLE_ALG_OID 3 */
++    oidSha1Fee,         /* APPLE_ALG_OID 4 */
++    oidEcPrime192v1,    /* OID_EC_CURVE 1 prime192v1/secp192r1/ansiX9p192r1*/
++    oidEcPrime256v1,    /* OID_EC_CURVE 7 prime256v1/secp256r1*/
++    oidAnsip224r1,      /* OID_CERTICOM_EC_CURVE 33 ansip224r1/secp224r1*/
++    oidAnsip384r1,      /* OID_CERTICOM_EC_CURVE 34 ansip384r1/secp384r1*/
++    oidAnsip521r1,      /* OID_CERTICOM_EC_CURVE 35 ansip521r1/secp521r1*/
++    oidPSSRsa,          /* OID RSASS-PSS */
++    oidMfg1,            /* RFC 4055: id-mgf1 */
++    oidEd25519,         /* RFC 8410: id-Ed25519 */
++    oidEd448,           /* RFC 8410: id-Ed448 */
++    oidX25519,          /* RFC 8410: id-X25519 */
++    oidX448,            /* RFC 8410: id-X448 */
++    oidSHAKE256;        /* RFC 8702: id-shake256 */
++
++/* Standard X.509 Cert and CRL extensions. */
++extern const DERItem
++    oidSubjectKeyIdentifier,
++    oidKeyUsage,
++    oidPrivateKeyUsagePeriod,
++    oidSubjectAltName,
++    oidIssuerAltName,
++    oidBasicConstraints,
++    oidNameConstraints,
++    oidCrlDistributionPoints,
++    oidCertificatePolicies,
++    oidAnyPolicy,
++    oidPolicyMappings,
++    oidAuthorityKeyIdentifier,
++    oidPolicyConstraints,
++    oidExtendedKeyUsage,
++    oidAnyExtendedKeyUsage,
++    oidInhibitAnyPolicy,
++    oidAuthorityInfoAccess,
++    oidQCStatements,
++    oidSubjectInfoAccess,
++    oidAdOCSP,
++    oidAdCAIssuer,
++    oidNetscapeCertType,
++    oidEntrustVersInfo,
++    oidMSNTPrincipalName,
++    oidOCSPNoCheck;
++
++/* Policy Qualifier IDs for Internet policy qualifiers. */
++extern const DERItem
++    oidQtCps,
++    oidQtUNotice;
++
++/* X.501 Name IDs. */
++extern const DERItem
++    oidCommonName,
++    oidCountryName,
++    oidLocalityName,
++    oidStateOrProvinceName,
++    oidOrganizationName,
++    oidOrganizationalUnitName,
++    oidDescription,
++    oidEmailAddress,
++    oidFriendlyName,
++    oidLocalKeyId,
++    oidStreetAddress,
++    oidUserId,
++    oidCollectiveOrganizationName,
++    oidCollectiveOrganizationalUnitName,
++    oidCollectiveStateOrProvinceName,
++    oidCollectiveStreetAddress;
++
++/* X.509 Extended Key Usages */
++extern const DERItem
++    oidExtendedKeyUsageServerAuth,
++    oidExtendedKeyUsageClientAuth,
++    oidExtendedKeyUsageCodeSigning,
++    oidExtendedKeyUsageEmailProtection,
++    oidExtendedKeyUsageTimeStamping,
++    oidExtendedKeyUsageOCSPSigning,
++    oidExtendedKeyUsageIPSec,
++    oidExtendedKeyUsageMicrosoftSGC,
++    oidExtendedKeyUsageNetscapeSGC;
++
++/* Google Certificate Transparency OIDs */
++extern const DERItem
++    oidGoogleEmbeddedSignedCertificateTimestamp,
++    oidGoogleOCSPSignedCertificateTimestamp;
++
++/* Apple Oids */
++extern const DERItem
++    oidAppleSecureBootCertSpec,
++    /* Ticket-Based Secure Boot Spec oid */
++    oidAppleSecureBootTicketCertSpec,
++    /* Image4 Manifest Signing Cert Spec */
++    oidAppleImg4ManifestCertSpec,
++    oidAppleProvisioningProfile,
++    oidAppleApplicationSigning,
++    oidAppleTVOSApplicationSigningProd,
++    oidAppleTVOSApplicationSigningProdQA,
++    oidAppleXROSApplicationSigningProd,
++    oidAppleXROSApplicationSigningProdQA,
++    oidAppleInstallerPackagingSigningExternal,
++    oidAppleExtendedKeyUsageCodeSigning,
++    oidAppleExtendedKeyUsageCodeSigningDev,
++    oidAppleExtendedKeyUsageAppleID,
++    oidAppleExtendedKeyUsagePassbook,
++    oidAppleExtendedKeyUsageProfileSigning,
++    oidAppleExtendedKeyUsageQAProfileSigning,
++    oidAppleIntmMarkerAppleWWDR,
++    oidAppleIntmMarkerAppleID,
++    oidAppleIntmMarkerAppleID2,
++    oidApplePushServiceClient,
++    oidApplePolicyMobileStore,
++    oidApplePolicyMobileStoreProdQA,
++    oidApplePolicyEscrowService,
++    oidAppleCertExtensionAppleIDRecordValidationSigning,
++    oidAppleCertExtOSXProvisioningProfileSigning,
++    oidAppleIntmMarkerAppleSystemIntg2,
++    oidAppleIntmMarkerAppleSystemIntgG3,
++    oidAppleCertExtAppleSMPEncryption,
++    oidAppleCertExtAppleServerAuthentication,
++    oidAppleCertExtAppleServerAuthenticationIDSProdQA,
++    oidAppleCertExtAppleServerAuthenticationIDSProd,
++    oidAppleCertExtAppleServerAuthenticationAPNProdQA,
++    oidAppleCertExtAppleServerAuthenticationAPNProd,
++    oidAppleCertExtAppleServerAuthenticationGS,
++    oidAppleCertExtAppleServerAuthenticationPPQProdQA,
++    oidAppleCertExtAppleServerAuthenticationPPQProd,
++    oidAppleIntmMarkerAppleServerAuthentication,
++    oidAppleCertExtApplePPQSigningProd,
++    oidAppleCertExtApplePPQSigningProdQA,
++    oidAppleCertExtATVAppSigningProd,
++    oidAppleCertExtATVAppSigningProdQA,
++    oidAppleCertExtATVVPNProfileSigning,
++    oidAppleCertExtCryptoServicesExtEncryption,
++    oidAppleCertExtAST2DiagnosticsServerAuthProdQA,
++    oidAppleCertExtAST2DiagnosticsServerAuthProd,
++    oidAppleCertExtEscrowProxyServerAuthProdQA,
++    oidAppleCertExtEscrowProxyServerAuthProd,
++    oidAppleCertExtFMiPServerAuthProdQA,
++    oidAppleCertExtFMiPServerAuthProd,
++    oidAppleCertExtHomeKitServerAuth,
++    oidAppleIntmMarkerAppleHomeKitServerCA,
++    oidAppleCertExtAppleServerAuthenticationMMCSProdQA,
++    oidAppleCertExtAppleServerAuthenticationMMCSProd,
++    oidAppleCertExtAppleServerAuthenticationiCloudSetupProdQA,
++    oidAppleCertExtAppleServerAuthenticationiCloudSetupProd,
++    oidAppleCertExtTrustCacheSigning,
++    oidAppleCertExtTrustCacheSigningTest;
++
++/* Microsoft Oids */
++extern const DERItem
++    oidMicrosoftSpcIndirectDataContext,
++    oidMicrosoftSpcSpOpusInfo,
++    oidMicrosoftSpcPEImageData;
++
++/* CMS Oids */
++extern const DERItem
++    oidContentType,
++    oidMessageDigest,
++    oidPkcs7SignedData;
++
++/* QC Statement Oids */
++extern const DERItem
++    oidQCSyntaxv1,
++    oidQCSyntaxv2,
++    oidSemanticsIdNatural,
++    oidSemanticsIdLegal,
++    oidSemanticsIdEidasNatural,
++    oidSemanticsIdEidasLegal,
++    oidQCCompliance,
++    oidQCLimitValue,
++    oidQCEuRetentionPeriod,
++    oidQCDisclosures,
++    oidQCType,
++    oidQCTypeEsign,
++    oidQCTypeEseal,
++    oidQCTypeWeb;
++
++/* Compare two decoded OIDs.  Returns true iff they are equivalent. */
++DERBool DEROidCompare(const DERItem *oid1, const DERItem *oid2);
++
++__END_DECLS
++
++#endif	/* _LIB_DER_OIDS_H_ */
