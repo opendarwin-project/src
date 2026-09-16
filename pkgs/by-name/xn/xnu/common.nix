@@ -3,14 +3,11 @@
   pname,
   version,
   src,
-  availabilityVersionsSrc,
-  libdispatchSrc,
   patches ? [ ],
-  darwinKernelVersion ? "24.6.0",
-  # Architecture, kernel variant, and machine/board targets
+  darwinKernelVersion ? "27.0.0",
   arch ? (if stdenv.system == "x86_64-darwin" then "X86_64" else "ARM64"),
   kernelConfig ? "RELEASE",
-  machineConfig ? (if arch == "X86_64" then "NONE" else "VMAPPLE"),
+  machineConfig ? (if arch == "X86_64" then "NONE" else "QEMU"),
   extraMakeArgs ? "",
   kernelOutputName ? (if arch == "X86_64" then "xnu.${kernelConfig}_${arch}" else "xnu.${kernelConfig}_${arch}_${machineConfig}"),
   description ? "XNU kernel",
@@ -19,6 +16,15 @@ let
   patchList = lib.concatStringsSep " " (builtins.map toString patches);
   targetConfigs = "${kernelConfig} ${arch} ${machineConfig}";
   archString = if arch == "X86_64" then "x86_64" else "arm64";
+
+  availabilityVersionsSrc = fetchurl {
+    url = "https://github.com/apple-oss-distributions/AvailabilityVersions/archive/refs/tags/AvailabilityVersions-157.2.tar.gz";
+    sha256 = "d92a052edb3c817caa4407868f66f1d93727425a353c2200a41481c27310fdc2";
+  };
+  libdispatchSrc = fetchurl {
+    url = "https://github.com/apple-oss-distributions/libdispatch/archive/refs/tags/libdispatch-1477.100.9.tar.gz";
+    sha256 = "97e3cac286e4d521594d4822767cd3b32b18a8ba8841c288451e786f69134c80";
+  };
 in
 stdenv.mkDerivation {
   inherit pname version src;

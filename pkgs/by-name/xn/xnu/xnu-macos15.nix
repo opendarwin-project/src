@@ -1,10 +1,10 @@
 { lib, stdenv, fetchurl, bootstrap-cmds, iig-tools, xcode-toolchain-wrappers, unifdef, cmake, xcbuild }:
 
-(import ./common.nix {
+(import ../xnu/common.nix {
   inherit lib stdenv bootstrap-cmds iig-tools xcode-toolchain-wrappers unifdef cmake xcbuild;
 }) rec {
-  pname = "xnu";
-  version = "12377.121.6";
+  pname = "xnu-macos15";
+  version = "11417.140.69";
   
   src = fetchurl {
     url = "https://github.com/apple-oss-distributions/xnu/archive/xnu-${version}.tar.gz";
@@ -18,10 +18,10 @@
     ./patches/0004-thinlto.patch
   ];
 
-  arch = "ARM64";
-  machineConfig = "QEMU";
+  arch = "X86_64";
+  machineConfig = "NONE";
   kernelConfig = "RELEASE";
-  darwinKernelVersion = "23.0.0";
-  extraMakeArgs = "MEMORY_SIZE=17179869184";
-  description = "XNU kernel (RELEASE ARM64 QEMU) from apple-oss-distributions";
+  darwinKernelVersion = "24.6.0";
+  extraMakeArgs = "MEMORY_SIZE=12884901888";
+  description = "macOS 15.8-compatible XNU RELEASE kernel (x86_64) without a KDK";
 }
