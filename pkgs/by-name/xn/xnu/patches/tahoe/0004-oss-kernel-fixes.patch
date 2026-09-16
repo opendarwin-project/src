@@ -1,0 +1,857 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Theo Paris <theo@theoparis.com>
+Date: Tue, 15 Sep 2026 20:21:43 -0700
+Subject: [PATCH 04/11] kernel: fix OSS/upstream-clang kernel bring-up
+
+Fixes needed to build and boot a standalone kernel with upstream clang
+and without Apple-silicon platform-expert support:
+
+  * kalloc.h gains portable fallbacks for Apple Clang's
+    __builtin_xnu_type_{summary,signature,types_compatible}.
+  * vm_user.c supplies the plain-named MIG forwarding wrappers on all
+    architectures and vm_map.defs skips the unimplemented routines.
+  * memdev/mockfs carry a 64-bit memdev base.
+  * bsd_init skips IOSecureBSDRoot on a ramdisk root, and
+    pthread_functions is writable after machine_lockdown().
+  * arm64 debug-trace gates and sleep asserts are relaxed for boards
+    with no Apple platform expert.
+---
+ bsd/conf/files                    |   1 +
+ bsd/dev/memdev.c                  |  10 +-
+ bsd/kern/bsd_init.c               |   4 +-
+ bsd/kern/mach_loader.c            |  15 +-
+ bsd/miscfs/mockfs/mockfs.h        |   2 +-
+ bsd/miscfs/mockfs/mockfs_fsnode.c |  21 +-
+ bsd/pthread/pthread_shims.c       |   9 +-
+ bsd/sys/disk_private.h            |   2 +-
+ iokit/Kernel/IOPMrootDomain.cpp   |  28 +-
+ osfmk/kern/debug.c                |  26 +-
+ osfmk/kern/exclaves.c             |   2 +-
+ osfmk/kern/kalloc.h               | 410 ++++++++++++++++++++++++++++++
+ osfmk/mach/vm_map.defs            |  26 +-
+ osfmk/vm/vm_user.c                |  38 ++-
+ 14 files changed, 532 insertions(+), 62 deletions(-)
+
+diff --git a/bsd/conf/files b/bsd/conf/files
+index 60d8aa61..d0053d03 100644
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -67,6 +67,7 @@ OPTIONS/fdesc				optional fdesc
+ OPTIONS/fifo				optional fifo
+ OPTIONS/devfs				optional devfs
+ OPTIONS/routefs				optional routefs
++OPTIONS/mockfs				optional mockfs
+ OPTIONS/crypto				optional crypto
+ OPTIONS/fs_compression		optional fs_compression
+ 
+diff --git a/bsd/dev/memdev.c b/bsd/dev/memdev.c
+index d24535df..d4441c09 100644
+--- a/bsd/dev/memdev.c
++++ b/bsd/dev/memdev.c
+@@ -387,9 +387,11 @@ mdevioctl(dev_t dev, u_long cmd, caddr_t data, __unused int flag,
+ 	if (devid >= NB_MAX_MDEVICES || devid < 0) {
+ 		return ENXIO;                                                                 /* Not valid */
+ 	}
+-	error = proc_suser(p);                  /* Are we superman? */
+-	if (error) {
+-		return error;                                                         /* Nope... */
++	if (p) {
++		error = proc_suser(p);                  /* Are we superman? */
++		if (error) {
++			return error;                                                         /* Nope... */
++		}
+ 	}
+ 	f = (u_int32_t*)data;
+ 	o = (u_int64_t *)data;
+@@ -450,7 +452,7 @@ mdevioctl(dev_t dev, u_long cmd, caddr_t data, __unused int flag,
+ 		}
+ 		memdev_info->mi_mdev = TRUE;
+ 		memdev_info->mi_phys = (mdev[devid].mdFlags & mdPhys) ? TRUE : FALSE;
+-		memdev_info->mi_base = (uint32_t)mdev[devid].mdBase;
++		memdev_info->mi_base = mdev[devid].mdBase;
+ 		memdev_info->mi_size = mdev[devid].mdSize;
+ 		break;
+ 
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+index ffe7ce09..1a58c45d 100644
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -913,7 +913,9 @@ bsd_init(void)
+ 		printf("cannot mount root, errno = %d\n", err);
+ 	}
+ 
+-	IOSecureBSDRoot(rootdevice);
++	if (!bsd_rooted_ramdisk()) {
++		IOSecureBSDRoot(rootdevice);
++	}
+ 
+ 	mountlist.tqh_first->mnt_flag |= MNT_ROOTFS;
+ 
+diff --git a/bsd/kern/mach_loader.c b/bsd/kern/mach_loader.c
+index 2c16ff7a..7a3787bb 100644
+--- a/bsd/kern/mach_loader.c
++++ b/bsd/kern/mach_loader.c
+@@ -1340,8 +1340,19 @@ parse_machfile(
+ 			/* Rosetta runtime allowed */
+ #endif /* CONFIG_X86_64_COMPAT */
+ 		} else {
+-			/* Check properties of static executables (disallowed except for development) */
+-#if !(DEVELOPMENT || DEBUG)
++			/*
++			 * Check properties of static executables (disallowed except
++			 * for development builds).
++			 *
++			 * XXX: this fork's minimal qemu ramdisk bring-up boots a
++			 * trivial freestanding static (non-PIE, non-dyld-linked)
++			 * process-1 init binary and has no DEVELOPMENT kernel config
++			 * variant that builds cleanly (it pulls in xnupost/test
++			 * infrastructure that isn't wired up), so this restriction is
++			 * relaxed for RELEASE too. Revisit once a real dyld-linked
++			 * userspace exists.
++			 */
++#if !(DEVELOPMENT || DEBUG || 1)
+ 			return LOAD_FAILURE;
+ #endif
+ 		}
+diff --git a/bsd/miscfs/mockfs/mockfs.h b/bsd/miscfs/mockfs/mockfs.h
+index 07c91ffa..5ce41d04 100644
+--- a/bsd/miscfs/mockfs/mockfs.h
++++ b/bsd/miscfs/mockfs/mockfs.h
+@@ -59,7 +59,7 @@ struct mockfs_mount {
+ 	mockfs_fsnode_t mockfs_root;            /* Root of the node tree */
+ 	boolean_t       mockfs_memory_backed;   /* Does the backing store reside in memory */
+ 	boolean_t       mockfs_physical_memory; /* (valid if memory backed) */
+-	uint32_t        mockfs_memdev_base;     /* Base page of the backing store (valid if memory backed) */
++	uint64_t        mockfs_memdev_base;     /* Base page of the backing store (valid if memory backed) */
+ 	uint64_t        mockfs_memdev_size;     /* Size of the backing store (valid if memory backed) */
+ };
+ 
+diff --git a/bsd/miscfs/mockfs/mockfs_fsnode.c b/bsd/miscfs/mockfs/mockfs_fsnode.c
+index e0001262..a5b90c7c 100644
+--- a/bsd/miscfs/mockfs/mockfs_fsnode.c
++++ b/bsd/miscfs/mockfs/mockfs_fsnode.c
+@@ -85,7 +85,7 @@ mockfs_fsnode_create(mount_t mp, uint8_t type, mockfs_fsnode_t * fsnpp)
+ 		goto done;
+ 	}
+ 
+-	*fsnpp = kalloc_type(mockfs_fsnode_t, Z_WAITOK | Z_ZERO | Z_NOFAIL);
++	*fsnpp = kalloc_type(struct mockfs_fsnode, Z_WAITOK | Z_ZERO | Z_NOFAIL);
+ 	(*fsnpp)->size = new_size;
+ 	(*fsnpp)->type = type;
+ 	(*fsnpp)->mnt = mp;
+@@ -154,7 +154,7 @@ mockfs_fsnode_destroy(mockfs_fsnode_t fsnp)
+ 		}
+ 	}
+ 
+-	kfree_type(mockfs_fsnode_t, fsnp);
++	kfree_type(struct mockfs_fsnode, fsnp);
+ done:
+ 	return rvalue;
+ }
+@@ -345,7 +345,22 @@ mockfs_fsnode_vnode(mockfs_fsnode_t fsnp, vnode_t * vpp)
+ 				panic("mockfs_fsvnode failed to get ubc_mem_object for a new vnode");
+ 			}
+ 
+-			rvalue = pager_map_to_phys_contiguous(ubc_mem_object, 0, (mockfs_mnt->mockfs_memdev_base << PAGE_SHIFT), fsnp->size);
++			/*
++			 * pager_map_to_phys_contiguous() expects a kernel *virtual*
++			 * address (it does a pmap_find_phys() lookup against
++			 * kernel_pmap to recover the underlying physical page).
++			 *
++			 * mockfs_memdev_base comes from DKIOCGETMEMDEVINFO's mi_base,
++			 * which for boot-time /chosen/memory-map ramdisks (see
++			 * IOKitBSDInit.cpp's mdevadd(-1, ml_static_ptovirt(...) >> 12,
++			 * ..., phys=0)) is already a *virtual* address page number
++			 * (mdevadd was called with phys=0), so it can be used directly
++			 * here without going through phystokv(). If a future caller
++			 * registers a memdev with phys=1 (a true physical base), this
++			 * would need phystokv() instead.
++			 */
++			rvalue = pager_map_to_phys_contiguous(ubc_mem_object, 0,
++			    ((addr64_t)mockfs_mnt->mockfs_memdev_base << PAGE_SHIFT), fsnp->size);
+ 
+ 			if (rvalue) {
+ 				panic("mockfs_fsnode_vnode failed to create fictitious pages for a memory-backed device; rvalue = %d", rvalue);
+diff --git a/bsd/pthread/pthread_shims.c b/bsd/pthread/pthread_shims.c
+index e5e58b56..535271ff 100644
+--- a/bsd/pthread/pthread_shims.c
++++ b/bsd/pthread/pthread_shims.c
+@@ -622,7 +622,14 @@ static const struct pthread_callbacks_s pthread_callbacks = {
+ };
+ 
+ SECURITY_READ_ONLY_LATE(pthread_callbacks_t) pthread_kern = &pthread_callbacks;
+-SECURITY_READ_ONLY_LATE(pthread_functions_t) pthread_functions = NULL;
++/*
++ * pthread_functions is written by pthread_kext_register(). On a shipping
++ * system that runs when pthread.kext loads, still before machine_lockdown().
++ * We are statically linked and call pthread_start() from bsd_init(), which is
++ * after machine_lockdown() has made __DATA_CONST read-only. Putting this
++ * pointer in SECURITY_READ_ONLY_LATE therefore data-aborts on the assignment.
++ */
++pthread_functions_t pthread_functions = NULL;
+ 
+ /*
+  * pthread_kext_register is called by pthread.kext upon load, it has to provide
+diff --git a/bsd/sys/disk_private.h b/bsd/sys/disk_private.h
+index 730d48ce..8fa09414 100644
+--- a/bsd/sys/disk_private.h
++++ b/bsd/sys/disk_private.h
+@@ -44,7 +44,7 @@
+ typedef struct{
+ 	boolean_t mi_mdev; /* Is this a memdev device? */
+ 	boolean_t mi_phys; /* Physical memory? */
+-	uint32_t mi_base; /* Base page number of the device? */
++	uint64_t mi_base; /* Base page number of the device? */
+ 	uint64_t mi_size; /* Size of the device (in ) */
+ } dk_memdev_info_t;
+ 
+diff --git a/iokit/Kernel/IOPMrootDomain.cpp b/iokit/Kernel/IOPMrootDomain.cpp
+index 4b421996..2f0c097c 100644
+--- a/iokit/Kernel/IOPMrootDomain.cpp
++++ b/iokit/Kernel/IOPMrootDomain.cpp
+@@ -3985,10 +3985,13 @@ IOPMrootDomain::tellChangeUp( unsigned long stateNum )
+ 		OSKextSystemSleepOrWake( kIOMessageSystemHasPoweredOn );
+ 
+ 		// Notify platform that sleep was cancelled or resumed.
+-		getPlatform()->callPlatformFunction(
+-			sleepMessagePEFunction.get(), false,
+-			(void *)(uintptr_t) kIOMessageSystemHasPoweredOn,
+-			NULL, NULL, NULL);
++		IOService *platform = getPlatform();
++		if (platform) {
++			platform->callPlatformFunction(
++				sleepMessagePEFunction.get(), false,
++				(void *)(uintptr_t) kIOMessageSystemHasPoweredOn,
++				NULL, NULL, NULL);
++		}
+ 
+ 		if (getPowerState() == ON_STATE) {
+ 			// Sleep was cancelled by idle cancel or revert
+@@ -4065,10 +4068,12 @@ IOPMrootDomain::sysPowerDownHandler(
+ 	    messageType == kIOMessageSystemHasPoweredOn) {
+ 		switch (messageType) {
+ 		case kIOMessageSystemWillPowerOn:
+-			assert(lastSystemMessageType == kIOMessageSystemWillSleep);
++			/* lastSystemMessageType == 0 is cold boot: tellChangeUp(ON)
++			 * can notify kernel clients without a preceding WillSleep. */
++			assert(lastSystemMessageType == 0 || lastSystemMessageType == kIOMessageSystemWillSleep);
+ 			break;
+ 		case kIOMessageSystemHasPoweredOn:
+-			assert(lastSystemMessageType == kIOMessageSystemWillPowerOn);
++			assert(lastSystemMessageType == 0 || lastSystemMessageType == kIOMessageSystemWillPowerOn);
+ 			break;
+ 		}
+ 
+@@ -4111,10 +4116,13 @@ IOPMrootDomain::sysPowerDownHandler(
+ 
+ 			// Notify platform that sleep has begun, after the early
+ 			// sleep policy evaluation.
+-			getPlatform()->callPlatformFunction(
+-				sleepMessagePEFunction.get(), false,
+-				(void *)(uintptr_t) kIOMessageSystemWillSleep,
+-				NULL, NULL, NULL);
++			IOService *platform = getPlatform();
++			if (platform) {
++				platform->callPlatformFunction(
++					sleepMessagePEFunction.get(), false,
++					(void *)(uintptr_t) kIOMessageSystemWillSleep,
++					NULL, NULL, NULL);
++			}
+ 
+ 			if (!OSCompareAndSwap( 0, 1, &gSleepOrShutdownPending )) {
+ 				// Purposely delay the ack and hope that shutdown occurs quickly.
+diff --git a/osfmk/kern/debug.c b/osfmk/kern/debug.c
+index 48f9405c..ddd5b5c8 100644
+--- a/osfmk/kern/debug.c
++++ b/osfmk/kern/debug.c
+@@ -727,20 +727,11 @@ DebuggerTrapWithState(debugger_op db_op, const char *db_message, const char *db_
+ {
+ 	kern_return_t ret;
+ 
+-#if defined(__arm64__) && (DEVELOPMENT || DEBUG)
+-	if (!PE_arm_debug_and_trace_initialized()) {
+-		/*
+-		 * In practice this can only happen if we panicked very early,
+-		 * when only the boot CPU is online and before it has finished
+-		 * initializing the debug and trace infrastructure. We're going
+-		 * to hang soon, so let's at least make sure the message passed
+-		 * to panic() is actually logged.
+-		 */
++	if (db_panic_str && db_panic_args) {
+ 		char buf[EARLY_PANIC_BUFLEN];
+ 		vsnprintf(buf, EARLY_PANIC_BUFLEN, db_panic_str, *db_panic_args);
+ 		paniclog_append_noflush("%s\n", buf);
+ 	}
+-#endif
+ 
+ 	assert(ml_get_interrupts_enabled() == FALSE);
+ 	DebuggerSaveState(db_op, db_message, db_panic_str, db_panic_args,
+@@ -1818,13 +1809,7 @@ handle_debugger_trap(unsigned int exception, unsigned int code, unsigned int sub
+ 			panic_stop();
+ 		}
+ #endif /* __arm64__ */
+-#if defined(__arm64__) && (DEBUG || DEVELOPMENT)
+-		if (!PE_arm_debug_and_trace_initialized()) {
+-			paniclog_append_noflush("kernel panicked before debug and trace infrastructure initialized!\n"
+-			    "spinning forever...\n");
+-			panic_spin_forever();
+-		}
+-#endif
++
+ 		debugger_collect_diagnostics(exception, code, subcode, state);
+ 	}
+ 
+@@ -2239,8 +2224,13 @@ kern_feature_override_init(void)
+ }
+ STARTUP(TUNABLES, STARTUP_RANK_LAST, kern_feature_override_init);
+ 
+-#if MACH_ASSERT
++/*
++ * Defined unconditionally: iokit/IOKit/assert.h's IOASSERT independently
++ * forces mach_assert_enabled() (and therefore this key) live even on
++ * kernel configs where MACH_ASSERT itself is off.
++ */
+ STATIC_IF_KEY_DEFINE_TRUE(mach_assert);
++#if MACH_ASSERT
+ STATIC_IF_KEY_DEFINE_TRUE(lck_rw_debug);
+ #endif
+ 
+diff --git a/osfmk/kern/exclaves.c b/osfmk/kern/exclaves.c
+index 6247d298..91226bde 100644
+--- a/osfmk/kern/exclaves.c
++++ b/osfmk/kern/exclaves.c
+@@ -3328,7 +3328,7 @@ STARTUP(TUNABLES, STARTUP_RANK_MIDDLE, exclaves_requirement_startup);
+ 
+ #endif /* CONFIG_EXCLAVES */
+ 
+-#if __has_include(<Tightbeam/tightbeam.h>)
++#if __has_include(<Tightbeam/tightbeam.h>) && !OSS_HARDWARE
+ 
+ #include <Tightbeam/tightbeam.h>
+ 
+diff --git a/osfmk/kern/kalloc.h b/osfmk/kern/kalloc.h
+index d491acce..ea79547b 100644
+--- a/osfmk/kern/kalloc.h
++++ b/osfmk/kern/kalloc.h
+@@ -826,6 +826,416 @@ __options_decl(kt_granule_t, uint32_t, {
+ 
+ #define KT_SUMMARY_MASK_TYPE_BITS  (0xffff)
+ 
++/*
++ * __builtin_xnu_type_{signature,summary,types_compatible} are Apple Clang
++ * extensions that walk a type's 8-byte granules. Upstream Clang has no
++ * equivalent. When they are absent:
++ *
++ * - summary: __builtin_classify_type. Scalars are data-only; pointers are
++ *   pointer-only; struct/union/array are mixed so they never take the
++ *   data-only heap (which must not contain pointers).
++ * - signature: empty. Boot grouping then uses size class (see
++ *   kalloc_type_cmp_fixed); weaker than layout hashing, still correct.
++ * - types_compatible: same-type check. Stricter than Apple's "same
++ *   signature" rule; valid for kfree_type's static assert.
++ */
++#if !__has_builtin(__builtin_xnu_type_summary)
++/* GCC/Clang classify_type: pointer=5, record=12, union=13, array=14. */
++#define __xnu_oss_type_summary(c) \
++	(((c) == 5) ? KT_SUMMARY_GRANULE_TO_IDX(KT_GRANULE_POINTER) : \
++	(((c) == 12) || ((c) == 13) || ((c) == 14)) ? \
++	    (KT_SUMMARY_GRANULE_TO_IDX(KT_GRANULE_POINTER) | \
++	    KT_SUMMARY_GRANULE_TO_IDX(KT_GRANULE_DATA)) : \
++	    KT_SUMMARY_GRANULE_TO_IDX(KT_GRANULE_DATA))
++#define __builtin_xnu_type_summary(type) \
++	__xnu_oss_type_summary(__builtin_classify_type(*((type *)0)))
++
++#if defined(__cplusplus) && __cplusplus >= 202002L
++/*
++ * The C fallback above treats every struct/union/array as "mixed"
++ * (possibly containing pointers), because __builtin_classify_type cannot
++ * look inside an aggregate. That is always safe, but it makes every
++ * plain-data struct (e.g. { uint64_t; uint64_t; }) ineligible for the
++ * data-only kalloc heap and fails static_asserts (e.g. OSData::withValue)
++ * that require an exact data-only proof. For C++ translation units we
++ * have a better option: walk the aggregate's members via structured
++ * bindings and classify each one recursively.
++ */
++extern "C++" {
++namespace __xnu_kt_detail {
++
++struct any_convertible {
++	template <typename T>
++	constexpr operator T() const;
++};
++
++template <typename Self>
++struct any_convertible_strict {
++	template <typename T>
++	constexpr operator T() const requires (!__is_same(T, Self));
++};
++
++template <typename T, typename... Args>
++consteval unsigned
++arity_impl()
++{
++	if constexpr (sizeof...(Args) > 16) {
++		return 17;
++	} else if constexpr (constexpr bool brace_grows = requires { T{ (Args{}, any_convertible{})..., any_convertible{} }; },
++	    paren_grows = requires { T( (Args{}, any_convertible_strict<T>{})..., any_convertible_strict<T>{} ); };
++	    brace_grows && paren_grows) {
++		return arity_impl<T, Args..., any_convertible>();
++	} else if constexpr (requires { T{ (Args{}, any_convertible{})..., any_convertible{} }; } !=
++	    requires { T( (Args{}, any_convertible_strict<T>{})..., any_convertible_strict<T>{} ); }) {
++		/*
++		 * Brace and paren construction disagree on whether one more
++		 * member exists: elision risk (see below), don't trust the
++		 * Args... prefix either.
++		 */
++		return 17;
++	} else if constexpr (requires { T{ (Args{}, any_convertible{})..., {} }; }) {
++		/*
++		 * Args... (length N) is a confirmed scalar-fillable prefix,
++		 * but there is at least one more member beyond it that
++		 * accepts an empty initializer without accepting a scalar
++		 * conversion - almost always a trailing array, most notably
++		 * C's "flexible array member" idiom used throughout this
++		 * codebase (e.g. `T entries[0]`). It is still a real,
++		 * structured-binding-visible member, just opaque to
++		 * any_convertible. A flexible array member is grammatically
++		 * required to be last, so more than one such member in a
++		 * row essentially doesn't happen; the check below is a
++		 * safety margin, not an expected case.
++		 */
++		if constexpr (requires { T{ (Args{}, any_convertible{})..., {}, {} }; }) {
++			return 17; /* too many opaque trailing members to safely resolve */
++		} else {
++			return sizeof...(Args) + 1;
++		}
++	} else {
++		return sizeof...(Args);
++	}
++}
++
++/*
++ * Number of direct data members of aggregate T.
++ *
++ * Brace-init counting (test T{u, u, ..., u} for growing u-counts) is the
++ * classic "ubiquitous convertible" arity probe, but braces allow brace
++ * elision: an array or nested-aggregate member silently absorbs several
++ * probe arguments, so the count it returns is a flattened scalar count,
++ * not a member count, whenever such a member is present. Parenthesized
++ * aggregate init (C++20) initializes members positionally with no
++ * elision, so it doesn't have that failure mode - but a *single* argument
++ * is ambiguous with a user-defined-conversion constructor call, which
++ * any_convertible_strict avoids by refusing to convert to T itself.
++ *
++ * The two methods have different, non-overlapping blind spots, so
++ * requiring them to agree on a growing prefix is a reliable check: they
++ * agree exactly when there is no elision to disagree about. A trailing
++ * member beyond that prefix which accepts only an empty initializer
++ * (see arity_impl) is counted separately. Any remaining disagreement, or
++ * a count over 16, falls back to the sentinel 17, telling the caller to
++ * skip decomposition and classify conservatively.
++ */
++template <typename T>
++consteval unsigned
++__xnu_kt_arity()
++{
++	if constexpr (!__is_aggregate(T) || !requires { T{}; }) {
++		return 17;
++	} else {
++		return arity_impl<T>();
++	}
++}
++
++template <typename T> consteval uint32_t __xnu_kt_summary();
++
++/* Classify one member (or, for an array member, its element type). */
++template <typename T>
++consteval uint32_t
++__xnu_kt_leaf_summary()
++{
++	using U = __remove_all_extents(__remove_cvref(T));
++	if constexpr (__is_pointer(U) || __is_member_pointer(U)) {
++		return KT_SUMMARY_GRANULE_TO_IDX(KT_GRANULE_POINTER);
++	} else if constexpr (__is_arithmetic(U) || __is_enum(U)) {
++		return KT_SUMMARY_GRANULE_TO_IDX(KT_GRANULE_DATA);
++	} else {
++		return __xnu_kt_summary<U>();
++	}
++}
++
++/*
++ * Decompose an aggregate into its direct members via structured bindings
++ * and OR together their granule summaries. Structured bindings require a
++ * literal member count, so this is an explicit table for arities 1-16;
++ * arity 0 (empty type) and >16 are handled by the caller.
++ */
++template <typename T>
++consteval uint32_t
++__xnu_kt_decompose()
++{
++	T obj{};
++		if constexpr (__xnu_kt_arity<T>() == 1) {
++			auto&& [m0] = obj;
++			return __xnu_kt_leaf_summary<decltype(m0)>();
++		}
++		if constexpr (__xnu_kt_arity<T>() == 2) {
++			auto&& [m0, m1] = obj;
++			return __xnu_kt_leaf_summary<decltype(m0)>() |
++			    __xnu_kt_leaf_summary<decltype(m1)>();
++		}
++		if constexpr (__xnu_kt_arity<T>() == 3) {
++			auto&& [m0, m1, m2] = obj;
++			return __xnu_kt_leaf_summary<decltype(m0)>() |
++			    __xnu_kt_leaf_summary<decltype(m1)>() |
++			    __xnu_kt_leaf_summary<decltype(m2)>();
++		}
++		if constexpr (__xnu_kt_arity<T>() == 4) {
++			auto&& [m0, m1, m2, m3] = obj;
++			return __xnu_kt_leaf_summary<decltype(m0)>() |
++			    __xnu_kt_leaf_summary<decltype(m1)>() |
++			    __xnu_kt_leaf_summary<decltype(m2)>() |
++			    __xnu_kt_leaf_summary<decltype(m3)>();
++		}
++		if constexpr (__xnu_kt_arity<T>() == 5) {
++			auto&& [m0, m1, m2, m3, m4] = obj;
++			return __xnu_kt_leaf_summary<decltype(m0)>() |
++			    __xnu_kt_leaf_summary<decltype(m1)>() |
++			    __xnu_kt_leaf_summary<decltype(m2)>() |
++			    __xnu_kt_leaf_summary<decltype(m3)>() |
++			    __xnu_kt_leaf_summary<decltype(m4)>();
++		}
++		if constexpr (__xnu_kt_arity<T>() == 6) {
++			auto&& [m0, m1, m2, m3, m4, m5] = obj;
++			return __xnu_kt_leaf_summary<decltype(m0)>() |
++			    __xnu_kt_leaf_summary<decltype(m1)>() |
++			    __xnu_kt_leaf_summary<decltype(m2)>() |
++			    __xnu_kt_leaf_summary<decltype(m3)>() |
++			    __xnu_kt_leaf_summary<decltype(m4)>() |
++			    __xnu_kt_leaf_summary<decltype(m5)>();
++		}
++		if constexpr (__xnu_kt_arity<T>() == 7) {
++			auto&& [m0, m1, m2, m3, m4, m5, m6] = obj;
++			return __xnu_kt_leaf_summary<decltype(m0)>() |
++			    __xnu_kt_leaf_summary<decltype(m1)>() |
++			    __xnu_kt_leaf_summary<decltype(m2)>() |
++			    __xnu_kt_leaf_summary<decltype(m3)>() |
++			    __xnu_kt_leaf_summary<decltype(m4)>() |
++			    __xnu_kt_leaf_summary<decltype(m5)>() |
++			    __xnu_kt_leaf_summary<decltype(m6)>();
++		}
++		if constexpr (__xnu_kt_arity<T>() == 8) {
++			auto&& [m0, m1, m2, m3, m4, m5, m6, m7] = obj;
++			return __xnu_kt_leaf_summary<decltype(m0)>() |
++			    __xnu_kt_leaf_summary<decltype(m1)>() |
++			    __xnu_kt_leaf_summary<decltype(m2)>() |
++			    __xnu_kt_leaf_summary<decltype(m3)>() |
++			    __xnu_kt_leaf_summary<decltype(m4)>() |
++			    __xnu_kt_leaf_summary<decltype(m5)>() |
++			    __xnu_kt_leaf_summary<decltype(m6)>() |
++			    __xnu_kt_leaf_summary<decltype(m7)>();
++		}
++		if constexpr (__xnu_kt_arity<T>() == 9) {
++			auto&& [m0, m1, m2, m3, m4, m5, m6, m7, m8] = obj;
++			return __xnu_kt_leaf_summary<decltype(m0)>() |
++			    __xnu_kt_leaf_summary<decltype(m1)>() |
++			    __xnu_kt_leaf_summary<decltype(m2)>() |
++			    __xnu_kt_leaf_summary<decltype(m3)>() |
++			    __xnu_kt_leaf_summary<decltype(m4)>() |
++			    __xnu_kt_leaf_summary<decltype(m5)>() |
++			    __xnu_kt_leaf_summary<decltype(m6)>() |
++			    __xnu_kt_leaf_summary<decltype(m7)>() |
++			    __xnu_kt_leaf_summary<decltype(m8)>();
++		}
++		if constexpr (__xnu_kt_arity<T>() == 10) {
++			auto&& [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9] = obj;
++			return __xnu_kt_leaf_summary<decltype(m0)>() |
++			    __xnu_kt_leaf_summary<decltype(m1)>() |
++			    __xnu_kt_leaf_summary<decltype(m2)>() |
++			    __xnu_kt_leaf_summary<decltype(m3)>() |
++			    __xnu_kt_leaf_summary<decltype(m4)>() |
++			    __xnu_kt_leaf_summary<decltype(m5)>() |
++			    __xnu_kt_leaf_summary<decltype(m6)>() |
++			    __xnu_kt_leaf_summary<decltype(m7)>() |
++			    __xnu_kt_leaf_summary<decltype(m8)>() |
++			    __xnu_kt_leaf_summary<decltype(m9)>();
++		}
++		if constexpr (__xnu_kt_arity<T>() == 11) {
++			auto&& [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10] = obj;
++			return __xnu_kt_leaf_summary<decltype(m0)>() |
++			    __xnu_kt_leaf_summary<decltype(m1)>() |
++			    __xnu_kt_leaf_summary<decltype(m2)>() |
++			    __xnu_kt_leaf_summary<decltype(m3)>() |
++			    __xnu_kt_leaf_summary<decltype(m4)>() |
++			    __xnu_kt_leaf_summary<decltype(m5)>() |
++			    __xnu_kt_leaf_summary<decltype(m6)>() |
++			    __xnu_kt_leaf_summary<decltype(m7)>() |
++			    __xnu_kt_leaf_summary<decltype(m8)>() |
++			    __xnu_kt_leaf_summary<decltype(m9)>() |
++			    __xnu_kt_leaf_summary<decltype(m10)>();
++		}
++		if constexpr (__xnu_kt_arity<T>() == 12) {
++			auto&& [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11] = obj;
++			return __xnu_kt_leaf_summary<decltype(m0)>() |
++			    __xnu_kt_leaf_summary<decltype(m1)>() |
++			    __xnu_kt_leaf_summary<decltype(m2)>() |
++			    __xnu_kt_leaf_summary<decltype(m3)>() |
++			    __xnu_kt_leaf_summary<decltype(m4)>() |
++			    __xnu_kt_leaf_summary<decltype(m5)>() |
++			    __xnu_kt_leaf_summary<decltype(m6)>() |
++			    __xnu_kt_leaf_summary<decltype(m7)>() |
++			    __xnu_kt_leaf_summary<decltype(m8)>() |
++			    __xnu_kt_leaf_summary<decltype(m9)>() |
++			    __xnu_kt_leaf_summary<decltype(m10)>() |
++			    __xnu_kt_leaf_summary<decltype(m11)>();
++		}
++		if constexpr (__xnu_kt_arity<T>() == 13) {
++			auto&& [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12] = obj;
++			return __xnu_kt_leaf_summary<decltype(m0)>() |
++			    __xnu_kt_leaf_summary<decltype(m1)>() |
++			    __xnu_kt_leaf_summary<decltype(m2)>() |
++			    __xnu_kt_leaf_summary<decltype(m3)>() |
++			    __xnu_kt_leaf_summary<decltype(m4)>() |
++			    __xnu_kt_leaf_summary<decltype(m5)>() |
++			    __xnu_kt_leaf_summary<decltype(m6)>() |
++			    __xnu_kt_leaf_summary<decltype(m7)>() |
++			    __xnu_kt_leaf_summary<decltype(m8)>() |
++			    __xnu_kt_leaf_summary<decltype(m9)>() |
++			    __xnu_kt_leaf_summary<decltype(m10)>() |
++			    __xnu_kt_leaf_summary<decltype(m11)>() |
++			    __xnu_kt_leaf_summary<decltype(m12)>();
++		}
++		if constexpr (__xnu_kt_arity<T>() == 14) {
++			auto&& [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13] = obj;
++			return __xnu_kt_leaf_summary<decltype(m0)>() |
++			    __xnu_kt_leaf_summary<decltype(m1)>() |
++			    __xnu_kt_leaf_summary<decltype(m2)>() |
++			    __xnu_kt_leaf_summary<decltype(m3)>() |
++			    __xnu_kt_leaf_summary<decltype(m4)>() |
++			    __xnu_kt_leaf_summary<decltype(m5)>() |
++			    __xnu_kt_leaf_summary<decltype(m6)>() |
++			    __xnu_kt_leaf_summary<decltype(m7)>() |
++			    __xnu_kt_leaf_summary<decltype(m8)>() |
++			    __xnu_kt_leaf_summary<decltype(m9)>() |
++			    __xnu_kt_leaf_summary<decltype(m10)>() |
++			    __xnu_kt_leaf_summary<decltype(m11)>() |
++			    __xnu_kt_leaf_summary<decltype(m12)>() |
++			    __xnu_kt_leaf_summary<decltype(m13)>();
++		}
++		if constexpr (__xnu_kt_arity<T>() == 15) {
++			auto&& [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14] = obj;
++			return __xnu_kt_leaf_summary<decltype(m0)>() |
++			    __xnu_kt_leaf_summary<decltype(m1)>() |
++			    __xnu_kt_leaf_summary<decltype(m2)>() |
++			    __xnu_kt_leaf_summary<decltype(m3)>() |
++			    __xnu_kt_leaf_summary<decltype(m4)>() |
++			    __xnu_kt_leaf_summary<decltype(m5)>() |
++			    __xnu_kt_leaf_summary<decltype(m6)>() |
++			    __xnu_kt_leaf_summary<decltype(m7)>() |
++			    __xnu_kt_leaf_summary<decltype(m8)>() |
++			    __xnu_kt_leaf_summary<decltype(m9)>() |
++			    __xnu_kt_leaf_summary<decltype(m10)>() |
++			    __xnu_kt_leaf_summary<decltype(m11)>() |
++			    __xnu_kt_leaf_summary<decltype(m12)>() |
++			    __xnu_kt_leaf_summary<decltype(m13)>() |
++			    __xnu_kt_leaf_summary<decltype(m14)>();
++		}
++		if constexpr (__xnu_kt_arity<T>() == 16) {
++			auto&& [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15] = obj;
++			return __xnu_kt_leaf_summary<decltype(m0)>() |
++			    __xnu_kt_leaf_summary<decltype(m1)>() |
++			    __xnu_kt_leaf_summary<decltype(m2)>() |
++			    __xnu_kt_leaf_summary<decltype(m3)>() |
++			    __xnu_kt_leaf_summary<decltype(m4)>() |
++			    __xnu_kt_leaf_summary<decltype(m5)>() |
++			    __xnu_kt_leaf_summary<decltype(m6)>() |
++			    __xnu_kt_leaf_summary<decltype(m7)>() |
++			    __xnu_kt_leaf_summary<decltype(m8)>() |
++			    __xnu_kt_leaf_summary<decltype(m9)>() |
++			    __xnu_kt_leaf_summary<decltype(m10)>() |
++			    __xnu_kt_leaf_summary<decltype(m11)>() |
++			    __xnu_kt_leaf_summary<decltype(m12)>() |
++			    __xnu_kt_leaf_summary<decltype(m13)>() |
++			    __xnu_kt_leaf_summary<decltype(m14)>() |
++			    __xnu_kt_leaf_summary<decltype(m15)>();
++		}
++	return KT_SUMMARY_GRANULE_TO_IDX(KT_GRANULE_POINTER) |
++	    KT_SUMMARY_GRANULE_TO_IDX(KT_GRANULE_DATA);
++}
++
++/*
++ * Full type summary for C++: walks aggregates recursively instead of the
++ * plain __builtin_classify_type approximation, so that pointer-free plain
++ * data structs (e.g. { uint64_t; uint64_t; }) are correctly recognized
++ * as data-only instead of conservatively rejected. Non-aggregates,
++ * unions, polymorphic classes, and aggregates __xnu_kt_arity can't pin
++ * down (see above) fall back to the same conservative "mixed"
++ * classification the C path uses, which is always safe (just ineligible
++ * for the data-only heap).
++ */
++template <typename T>
++consteval uint32_t
++__xnu_kt_summary()
++{
++	if constexpr (__is_array(T)) {
++		/*
++		 * Top-level array type (e.g. OSData::withValue(unsigned char
++		 * uuid[16])): classify by element type directly. The
++		 * brace/paren arity probe below is class-oriented -
++		 * parenthesized aggregate-init syntax doesn't apply to array
++		 * types, so it would always disagree with the brace count
++		 * and conservatively (wrongly) call every array type mixed.
++		 */
++		return __xnu_kt_leaf_summary<T>();
++	} else if constexpr (__is_pointer(T) || __is_member_pointer(T)) {
++		return KT_SUMMARY_GRANULE_TO_IDX(KT_GRANULE_POINTER);
++	} else if constexpr (__is_arithmetic(T) || __is_enum(T)) {
++		return KT_SUMMARY_GRANULE_TO_IDX(KT_GRANULE_DATA);
++	} else if constexpr (__is_union(T) || __is_polymorphic(T) ||
++	    !__is_standard_layout(T) || !__is_aggregate(T) || !__is_literal_type(T)) {
++		/*
++		 * !__is_literal_type also catches types the decompose path
++		 * could never handle anyway: a flexible array member (e.g.
++		 * `T entries[0]`, used throughout this codebase) makes T
++		 * non-literal, and `T obj{};` below is only valid in a
++		 * consteval function for a literal type.
++		 */
++		return KT_SUMMARY_GRANULE_TO_IDX(KT_GRANULE_POINTER) |
++		    KT_SUMMARY_GRANULE_TO_IDX(KT_GRANULE_DATA);
++	} else if constexpr (__xnu_kt_arity<T>() == 0) {
++		return KT_SUMMARY_GRANULE_TO_IDX(KT_GRANULE_DATA);
++	} else if constexpr (__xnu_kt_arity<T>() > 16) {
++		return KT_SUMMARY_GRANULE_TO_IDX(KT_GRANULE_POINTER) |
++		    KT_SUMMARY_GRANULE_TO_IDX(KT_GRANULE_DATA);
++	} else {
++		return __xnu_kt_decompose<T>();
++	}
++}
++
++} /* namespace __xnu_kt_detail */
++} /* extern "C++" */
++
++#undef __builtin_xnu_type_summary
++#define __builtin_xnu_type_summary(type) \
++	(__xnu_kt_detail::__xnu_kt_summary<type>())
++#endif /* defined(__cplusplus) && __cplusplus >= 202002L */
++#endif
++
++#if !__has_builtin(__builtin_xnu_type_signature)
++#define __builtin_xnu_type_signature(type) ""
++#endif
++
++#if !__has_builtin(__builtin_xnu_types_compatible)
++#if defined(__cplusplus)
++#define __builtin_xnu_types_compatible(t1, t2) __is_same(t1, t2)
++#else
++#define __builtin_xnu_types_compatible(t1, t2) \
++	__builtin_types_compatible_p(t1, t2)
++#endif
++#endif
++
+ #define KT_SUMMARY_MASK_DATA                             \
+ 	(KT_SUMMARY_GRANULE_TO_IDX(KT_GRANULE_PADDING) |  \
+ 	    KT_SUMMARY_GRANULE_TO_IDX(KT_GRANULE_DATA))
+diff --git a/osfmk/mach/vm_map.defs b/osfmk/mach/vm_map.defs
+index c9412377..a89afd73 100644
+--- a/osfmk/mach/vm_map.defs
++++ b/osfmk/mach/vm_map.defs
+@@ -378,20 +378,14 @@ routine vm_map_page_query(
+         out     ref_count       :integer_t);
+ 
+ /*
+- *	Returns information about a region of memory.
+- *	Includes info about the chain of objects rooted at that region.
+- *      Only available in MACH_VM_DEBUG compiled kernels,
+- *      otherwise returns KERN_FAILURE.
++ *	mach_vm_region_info / vm_mapped_pages_info: marked OBSOLETE, and
++ *	their implementations (MACH_VM_DEBUG-gated) are not present in this
++ *	source drop. Skipped rather than stubbed, preserving MIG routine
++ *	numbers for wire-protocol stability - same treatment already given
++ *	to vm_region_object_create below.
+  */
+-routine mach_vm_region_info(
+-		task		: vm_map_read_t;
+-		address		: vm_address_t;
+-	out	region		: vm_info_region_t;
+-	out	objects		: vm_info_object_array_t);
+-
+-routine	vm_mapped_pages_info(  /* OBSOLETE */
+-		task		: vm_map_read_t;
+-	out	pages		: page_address_array_t);
++skip; /* was mach_vm_region_info */
++skip; /* was vm_mapped_pages_info */
+ 
+ skip; /* was vm_region_object_create */
+ 
+@@ -420,11 +414,7 @@ routine vm_region_recurse_64(
+ 	inout	nesting_depth	: natural_t;
+ 	out	info		: vm_region_recurse_info_t,CountInOut);
+ 
+-routine mach_vm_region_info_64( /* OBSOLETE */
+-		task		: vm_map_read_t;
+-		address		: vm_address_t;
+-	out	region		: vm_info_region_64_t;
+-	out	objects		: vm_info_object_array_t);
++skip; /* was mach_vm_region_info_64 (OBSOLETE, no OSS implementation) */
+ 
+ routine vm_region_64(
+                 target_task     : vm_map_read_t;
+diff --git a/osfmk/vm/vm_user.c b/osfmk/vm/vm_user.c
+index fbf48b01..6e82100b 100644
+--- a/osfmk/vm/vm_user.c
++++ b/osfmk/vm/vm_user.c
+@@ -164,6 +164,16 @@ mach_vm_allocate_external(
+ 	return mach_vm_allocate_kernel(map, addr, size, vmk_flags);
+ }
+ 
++kern_return_t
++mach_vm_allocate(
++	vm_map_t                map,
++	mach_vm_offset_ut      *addr,
++	mach_vm_size_ut         size,
++	int                     flags)
++{
++	return mach_vm_allocate_external(map, addr, size, flags);
++}
++
+ /*
+  *	vm_allocate
+  *	Legacy routine that allocates "zero fill" memory in the specfied
+@@ -2374,7 +2384,14 @@ mach_vm_range_create(
+  * despite not being exported in the symbol sets.
+  */
+ 
+-#if defined(__x86_64__)
++/*
++ * Plain-named (non-"_external") forwarding wrappers. MIG's KERNEL_SERVER
++ * suffixing (see vm_map.defs/mach_vm.defs) routes RPC dispatch to the
++ * "_external" (sanitized-argument) symbols, but several kernel-internal
++ * callers (kern_stackshot.c, vm_pageout.c, IOMemoryDescriptor.cpp,
++ * dtrace_ptss.c, ...) call the plain names directly as ordinary C calls,
++ * on every architecture, not just x86_64.
++ */
+ 
+ extern typeof(mach_vm_remap_external) mach_vm_remap;
+ extern typeof(mach_vm_map_external) mach_vm_map;
+@@ -2435,4 +2452,21 @@ vm_map(
+ 	           cur_protection, max_protection, inheritance);
+ }
+ 
+-#endif /* __x86_64__ */
++kern_return_t
++vm_allocate(
++	vm_map_t                target_map,
++	vm_offset_ut           *addr,
++	vm_size_ut               size,
++	int                      flags)
++{
++	return vm_allocate_external(target_map, addr, size, flags);
++}
++
++kern_return_t
++mach_vm_deallocate(
++	vm_map_t                target_map,
++	mach_vm_offset_ut       start,
++	mach_vm_size_ut         size)
++{
++	return mach_vm_deallocate_external(target_map, start, size);
++}

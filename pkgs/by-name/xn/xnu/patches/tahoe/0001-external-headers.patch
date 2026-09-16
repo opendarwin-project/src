@@ -1,3 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Theo Paris <theo@theoparis.com>
+Date: Tue, 15 Sep 2026 20:21:27 -0700
+Subject: [PATCH 01/11] external-headers: import Apple private headers for
+ no-KDK builds
+
+Add the private headers a standalone (KDK-less) XNU build needs:
+TrustCache, CoreEntitlements V2, CodeSignature, iBoot boot_args_abi.h,
+and TargetConditionals.h. Also register TargetConditionals.h in
+EXTERNAL_HEADERS/Makefile and point image4/img4 at <Availability.h>,
+which AvailabilityVersions provides.
+
+Extracted from the OpenDarwin ARM64 platform-support work.
+---
+ EXTERNAL_HEADERS/CodeSignature/Entitlements.h | 192 +++++++
+ EXTERNAL_HEADERS/CodeSignature/Return.h       | 252 +++++++++
+ EXTERNAL_HEADERS/CoreEntitlements/V2/API.h    | 522 +++++++++++++++++
+ .../CoreEntitlements/V2/Acceleration.h        |  78 +++
+ .../CoreEntitlements/V2/Closure.h             | 111 ++++
+ .../CoreEntitlements/V2/Context.h             | 106 ++++
+ EXTERNAL_HEADERS/CoreEntitlements/V2/Kernel.h |  63 +++
+ EXTERNAL_HEADERS/CoreEntitlements/V2/Return.h | 111 ++++
+ .../CoreEntitlements/V2/StackProtector.h      |  43 ++
+ EXTERNAL_HEADERS/Makefile                     |   3 +-
+ EXTERNAL_HEADERS/TargetConditionals.h         | 525 ++++++++++++++++++
+ EXTERNAL_HEADERS/TrustCache/API.h             | 188 +++++++
+ EXTERNAL_HEADERS/TrustCache/RawTypes.h        | 103 ++++
+ EXTERNAL_HEADERS/TrustCache/Return.h          | 123 ++++
+ EXTERNAL_HEADERS/TrustCache/Types.h           | 320 +++++++++++
+ EXTERNAL_HEADERS/TrustCache/TypesConfig.h     | 389 +++++++++++++
+ EXTERNAL_HEADERS/iBoot/boot_args_abi.h        |  11 +
+ EXTERNAL_HEADERS/image4/image4.h              |   4 +-
+ EXTERNAL_HEADERS/img4/shim_xnu.h              |   2 +-
+ 19 files changed, 3142 insertions(+), 4 deletions(-)
+ create mode 100644 EXTERNAL_HEADERS/CodeSignature/Entitlements.h
+ create mode 100644 EXTERNAL_HEADERS/CodeSignature/Return.h
+ create mode 100644 EXTERNAL_HEADERS/CoreEntitlements/V2/API.h
+ create mode 100644 EXTERNAL_HEADERS/CoreEntitlements/V2/Acceleration.h
+ create mode 100644 EXTERNAL_HEADERS/CoreEntitlements/V2/Closure.h
+ create mode 100644 EXTERNAL_HEADERS/CoreEntitlements/V2/Context.h
+ create mode 100644 EXTERNAL_HEADERS/CoreEntitlements/V2/Kernel.h
+ create mode 100644 EXTERNAL_HEADERS/CoreEntitlements/V2/Return.h
+ create mode 100644 EXTERNAL_HEADERS/CoreEntitlements/V2/StackProtector.h
+ create mode 100644 EXTERNAL_HEADERS/TargetConditionals.h
+ create mode 100644 EXTERNAL_HEADERS/TrustCache/API.h
+ create mode 100644 EXTERNAL_HEADERS/TrustCache/RawTypes.h
+ create mode 100644 EXTERNAL_HEADERS/TrustCache/Return.h
+ create mode 100644 EXTERNAL_HEADERS/TrustCache/Types.h
+ create mode 100644 EXTERNAL_HEADERS/TrustCache/TypesConfig.h
+ create mode 100644 EXTERNAL_HEADERS/iBoot/boot_args_abi.h
+
 diff --git a/EXTERNAL_HEADERS/CodeSignature/Entitlements.h b/EXTERNAL_HEADERS/CodeSignature/Entitlements.h
 new file mode 100644
 index 00000000..89a43a4b
@@ -1530,6 +1581,20 @@ index 00000000..894cd562
 +
 +__END_DECLS
 +#endif /* CoreEntitlements_V2_StackProtector_h */
+diff --git a/EXTERNAL_HEADERS/Makefile b/EXTERNAL_HEADERS/Makefile
+index 8cd21535..82337c61 100644
+--- a/EXTERNAL_HEADERS/Makefile
++++ b/EXTERNAL_HEADERS/Makefile
+@@ -31,7 +31,8 @@ KERNEL_FILES = \
+ 	stdbool.h	\
+ 	stddef.h	\
+ 	stdint.h	\
+-	ptrauth.h
++	ptrauth.h \
++	TargetConditionals.h
+ 
+ LIBCXX_DATAFILES = \
+ 	_inttypes.h \
 diff --git a/EXTERNAL_HEADERS/TargetConditionals.h b/EXTERNAL_HEADERS/TargetConditionals.h
 new file mode 100644
 index 00000000..6f15f18d
@@ -3231,3 +3296,31 @@ index 00000000..cc3b984f
 +#define IBOOT_MAX_ENV_VAR_DATA_SIZE 4096
 +
 +#endif /* _IBOOT_BOOT_ARGS_ABI_H_ */
+diff --git a/EXTERNAL_HEADERS/image4/image4.h b/EXTERNAL_HEADERS/image4/image4.h
+index bcaf4b4a..b095bc90 100644
+--- a/EXTERNAL_HEADERS/image4/image4.h
++++ b/EXTERNAL_HEADERS/image4/image4.h
+@@ -86,8 +86,8 @@ typedef int errno_t;
+ #include <TargetConditionals.h>
+ #endif
+ 
+-#if __has_include(<os/availability.h>)
+-#include <os/availability.h>
++#if __has_include(<Availability.h>)
++#include <Availability.h>
+ #endif
+ 
+ #if __has_include(<sys/cdefs.h>)
+diff --git a/EXTERNAL_HEADERS/img4/shim_xnu.h b/EXTERNAL_HEADERS/img4/shim_xnu.h
+index 7adbbbb2..a870c1ef 100644
+--- a/EXTERNAL_HEADERS/img4/shim_xnu.h
++++ b/EXTERNAL_HEADERS/img4/shim_xnu.h
+@@ -11,7 +11,7 @@
+ 
+ #if !XNU_KERNEL_PRIVATE
+ #include <TargetConditionals.h>
+-#include <os/availability.h>
++#include <Availability.h>
+ #endif
+ 
+ #include <os/base.h>

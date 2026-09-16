@@ -1,0 +1,139 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Theo Paris <theo@theoparis.com>
+Date: Sun, 13 Sep 2026 00:21:17 -0700
+Subject: [PATCH 11/11] Fix duplicate symbols
+
+Signed-off-by: Theo Paris <theo@theoparis.com>
+(cherry picked from commit 901f4bd84bb0f8d663110120edfa157068e064ba)
+---
+ config/Private.arm64.exports     |  6 ++++--
+ config/Private.exports           |  6 ++++--
+ config/Unsupported.arm64.exports |  3 ++-
+ config/Unsupported.exports       |  3 ++-
+ makedefs/MakeInc.cmd             |  2 +-
+ makedefs/MakeInc.def             |  1 +
+ osfmk/arm/pmap/pmap_misc.c       | 17 +++++++++++++++++
+ 7 files changed, 31 insertions(+), 7 deletions(-)
+
+diff --git a/config/Private.arm64.exports b/config/Private.arm64.exports
+index 2eef47de..3bb3b4fa 100644
+--- a/config/Private.arm64.exports
++++ b/config/Private.arm64.exports
+@@ -26,8 +26,10 @@ _ecc_log_memory_error_delayed
+ _ecc_log_record_event
+ _get_preemption_level
+ _kern_ecc_poll_register
+-_mach_vm_map:_mach_vm_map_external
+-_mach_vm_remap:_mach_vm_remap_external
++_mach_vm_map
++_mach_vm_map_external
++_mach_vm_remap
++_mach_vm_remap_external
+ _mcc_log_memory_error
+ _ml_arm_sleep
+ _ml_get_abstime_offset
+diff --git a/config/Private.exports b/config/Private.exports
+index 9c32b796..118ebc17 100644
+--- a/config/Private.exports
++++ b/config/Private.exports
+@@ -801,9 +801,11 @@ _mach_gss_init_sec_context_v3
+ _mach_gss_log_error
+ _mach_msg_filter_register_callback
+ _kernel_mach_msg_send_with_builder
+-_mach_vm_allocate:_mach_vm_allocate_external
++_mach_vm_allocate
++_mach_vm_allocate_external
+ _mach_vm_behavior_set
+-_mach_vm_deallocate:_mach_vm_deallocate_external
++_mach_vm_deallocate
++_mach_vm_deallocate_external
+ _mach_vm_protect
+ _mach_vm_wire_level_monitor
+ _mbuf_add_drvaux
+diff --git a/config/Unsupported.arm64.exports b/config/Unsupported.arm64.exports
+index 43386ba0..39c9290a 100644
+--- a/config/Unsupported.arm64.exports
++++ b/config/Unsupported.arm64.exports
+@@ -18,6 +18,7 @@ _kpc_set_running:_kpc_set_running_external
+ _kpc_get_cpu_counters
+ _kpc_get_config
+ _kpc_set_config:_kpc_set_config_external
+-_vm_map:_vm_map_external
++_vm_map
++_vm_map_external
+ __ZN5IORTC15getUTCTimeOfDayEPmPj
+ __ZN5IORTC15setUTCTimeOfDayEmj
+diff --git a/config/Unsupported.exports b/config/Unsupported.exports
+index eafc2a24..e7feba9a 100644
+--- a/config/Unsupported.exports
++++ b/config/Unsupported.exports
+@@ -181,7 +181,8 @@ _tsleep
+ _ubc_cs_blob_get
+ _vfs_context_current
+ _vfs_update_vfsstat
+-_vm_allocate:_vm_allocate_external
++_vm_allocate
++_vm_allocate_external
+ _vm_deallocate
+ _vm_map_deallocate
+ _vm_map_unwire
+diff --git a/makedefs/MakeInc.cmd b/makedefs/MakeInc.cmd
+index 1acd4fe9..570d679b 100644
+--- a/makedefs/MakeInc.cmd
++++ b/makedefs/MakeInc.cmd
+@@ -331,7 +331,7 @@ VM_SANITIZE_ADOPTION_CHECK = $(SRCROOT)/tools/vm_sanitize_enforcement.py
+ # Standard BSD tools
+ RM = /bin/rm -f
+ RMDIR = /bin/rmdir
+-CP = /bin/cp
++CP = cp
+ MV = /bin/mv
+ LN = /bin/ln -fs
+ CAT = /bin/cat
+diff --git a/makedefs/MakeInc.def b/makedefs/MakeInc.def
+index a0ae7ab1..75e119ec 100644
+--- a/makedefs/MakeInc.def
++++ b/makedefs/MakeInc.def
+@@ -220,6 +220,7 @@ WARNFLAGS_STD := \
+ 	-Wno-ms-bitfield-padding \
+ 	-Wno-partial-availability \
+ 	-Wno-reserved-id-macro \
++	-Wno-reserved-identifier \
+ 	-Wno-shift-sign-overflow \
+ 	-Wno-switch-enum \
+ 	-Wno-unaligned-access \
+diff --git a/osfmk/arm/pmap/pmap_misc.c b/osfmk/arm/pmap/pmap_misc.c
+index 2c48020c..53a2f594 100644
+--- a/osfmk/arm/pmap/pmap_misc.c
++++ b/osfmk/arm/pmap/pmap_misc.c
+@@ -27,6 +27,7 @@
+  */
+ #include <arm/pmap/pmap_internal.h>
+ #include <arm/preemption_disable_internal.h>
++#include <sys/code_signing.h>
+ 
+ /**
+  * Placeholder for random pmap functionality that doesn't fit into any of the
+@@ -52,6 +53,22 @@ pmap_abandon_measurement(void)
+ #endif /* SCHED_HYGIENE_DEBUG */
+ }
+ 
++int
++pmap_cs_configuration(void)
++{
++	code_signing_config_t config = 0;
++
++	code_signing_configuration(NULL, &config);
++	return (int)config;
++}
++
++bool
++pmap_has_iofilter_protected_write(void)
++{
++	/* QEMU has no guarded I/O monitor. */
++	return false;
++}
++
+ #if SCHED_HYGIENE_DEBUG && (DEBUG || DEVELOPMENT)
+ bool
+ pmap_pending_preemption(void)
