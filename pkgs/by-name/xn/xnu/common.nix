@@ -54,19 +54,15 @@ stdenv.mkDerivation {
     ln -sf ../IOKit/IOReportTypes.h iokit/DriverKit/IOReportTypes.h
     ln -sf ../../osfmk/kern/macro_help.h iokit/DriverKit/macro_help.h
 
-    # SDK overlay: pin to the system SDK and add availability.pl, which the
-    # public Command Line Tools SDK does not ship. No KDK is required.
-    SYS_SDK="$(xcrun --show-sdk-path)"
-    mkdir -p sdk/usr
-    for p in "$SYS_SDK"/*; do
-      ln -sf "$p" "sdk/$(basename "$p")"
-    done
-    rm -f sdk/usr
-    mkdir -p sdk/usr
-    for p in "$SYS_SDK"/usr/*; do
-      ln -sf "$p" "sdk/usr/$(basename "$p")"
-    done
-    mkdir -p sdk/usr/local/libexec
+    # Hermetic SDK structure; no external KDK required.
+    mkdir -p sdk/usr/include sdk/usr/lib sdk/usr/local/libexec sdk/usr/local/lib/kernel sdk/usr/local/include/kernel/os
+    if command -v xcrun >/dev/null 2>&1; then
+      SYS_SDK="$(xcrun --show-sdk-path 2>/dev/null || true)"
+      if [ -n "$SYS_SDK" ] && [ -d "$SYS_SDK/usr/include" ]; then
+        ln -sf "$SYS_SDK"/usr/include/* sdk/usr/include/ 2>/dev/null || true
+        ln -sf "$SYS_SDK"/usr/lib/* sdk/usr/lib/ 2>/dev/null || true
+      fi
+    fi
     cp AvailabilityVersions/availability.pl sdk/usr/local/libexec/ 2>/dev/null || true
     cp AvailabilityVersions/availability sdk/usr/local/libexec/ 2>/dev/null || true
     cp AvailabilityVersions/availability.dsl sdk/usr/local/libexec/ 2>/dev/null || true

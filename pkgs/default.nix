@@ -56,6 +56,7 @@ let
 
     # Aliases
     make = pkgs.gnumake;
+    xnu-macos15 = callPackage ./by-name/xn/xnu/xnu-macos15.nix { };
 
 
   };
