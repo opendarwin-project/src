@@ -17,6 +17,7 @@
     ./patches/0002-simplify-san-lipo.patch
     ./patches/0003-dsymutil-no-process-substitution.patch
     ./patches/0004-thinlto.patch
+    ./patches/0005-iorpc-message-from-mach.patch
   ];
 
   arch = "X86_64";
