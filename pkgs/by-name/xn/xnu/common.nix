@@ -1,4 +1,4 @@
-{ lib, stdenv, bootstrap-cmds, iig-tools, xcode-toolchain-wrappers, unifdef, cmake, xcbuild }:
+{ fetchurl, lib, stdenv, bootstrap-cmds, iig-tools, xcode-toolchain-wrappers, unifdef, cmake, xcbuild }:
 {
   pname,
   version,

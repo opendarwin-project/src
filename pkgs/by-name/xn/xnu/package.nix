@@ -1,7 +1,7 @@
 { lib, stdenv, fetchurl, bootstrap-cmds, iig-tools, xcode-toolchain-wrappers, unifdef, cmake, xcbuild }:
 
 (import ./common.nix {
-  inherit lib stdenv bootstrap-cmds iig-tools xcode-toolchain-wrappers unifdef cmake xcbuild;
+  inherit fetchurl lib stdenv bootstrap-cmds iig-tools xcode-toolchain-wrappers unifdef cmake xcbuild;
 }) rec {
   pname = "xnu";
   version = "12377.121.6";

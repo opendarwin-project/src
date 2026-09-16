@@ -56,9 +56,6 @@ let
 
     # Aliases
     make = pkgs.gnumake;
-    xnu-macos15 = callPackage ./by-name/xn/xnu/xnu-macos15.nix { };
-
-
   };
 
   # Auto-discover all packages in pkgs/by-name/<prefix>/<name>/package.nix
