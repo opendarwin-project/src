@@ -1,0 +1,25 @@
+--- a/libkern/os/log_private.h
++++ b/libkern/os/log_private.h
+@@ -28,6 +28,22 @@
+ #include <firehose/tracepoint_private.h>
+ #include <sys/queue.h>
+ 
++/* The userspace os_log_pack_s/os_log_pack_t are normally supplied by the
++ * Apple-internal libsystem_trace os/log_private.h.  The bootstrap installs this
++ * kernel header instead, so provide the small userspace subset that Libc's
++ * os/assumes.c requires (os_log_t/os_log_type_t come from <os/log.h>). */
++#ifndef __os_log_pack_t_defined
++#define __os_log_pack_t_defined 1
++typedef struct os_log_pack_s {
++	uint64_t olp_continuous_time;
++	struct timespec olp_wall_time;
++	const void *olp_mh;
++	const void *olp_pc;
++	const char *olp_format;
++	uint8_t olp_data[0];
++} os_log_pack_s, *os_log_pack_t;
++#endif
++
+ #define OS_LOG_XNU_SUBSYSTEM  "com.apple.xnu"
+ #define OS_LOG_SUBSYSTEM      "com.apple.xnu.oslog"
+ #define OS_LOG_MAX_SIZE_ORDER 10 // Maximum log size order (1024 bytes)

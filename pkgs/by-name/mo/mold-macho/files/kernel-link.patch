@@ -1,0 +1,384 @@
+--- a/src/cmdline.rs
++++ b/src/cmdline.rs
+@@ -228,6 +228,23 @@
+     /// True when -pagezero_size was given explicitly (it is an error
+     /// anywhere but a main executable).
+     pub explicit_pagezero: bool,
++    /// -static: a static executable (the kernel).  No dyld info,
++    /// chained fixups or lazy binding are emitted.
++    pub static_link: bool,
++    /// -pie: build a position-independent executable.
++    pub pie: bool,
++    /// -image_base: the VM address of the __TEXT segment.
++    pub image_base: Option<u64>,
++    /// -segaddr: explicit VM address for a named segment.
++    pub segaddrs: Vec<(String, u64)>,
++    /// -segprot: (segment, max_prot, init_prot) overrides.
++    pub segprots: Vec<(String, u32, u32)>,
++    /// -segment_order: the order segments appear in the load commands.
++    pub segment_order: Vec<String>,
++    /// -rename_section: (old_seg, old_sect, new_seg, new_sect).
++    pub rename_sections: Vec<(String, String, String, String)>,
++    /// -rename_segment: (old_seg, new_seg).
++    pub rename_segments: Vec<(String, String)>,
+ }
+ 
+ impl Default for Args {
+@@ -313,6 +330,14 @@
+             local_keep_list: None,
+             pagezero_size: 0x1_0000_0000,
+             explicit_pagezero: false,
++            static_link: false,
++            pie: false,
++            image_base: None,
++            segaddrs: Vec::new(),
++            segprots: Vec::new(),
++            segment_order: Vec::new(),
++            rename_sections: Vec::new(),
++            rename_segments: Vec::new(),
+         }
+     }
+ }
+@@ -369,6 +394,24 @@
+     }
+ }
+ 
++/// Parses an ld64 segment-protection string such as "r-x" or "rw-".
++fn parse_prot(opt: &str, val: &str) -> u32 {
++    if val.len() != 3 {
++        fatal!("malformed {opt} protection: {val}");
++    }
++    let mut prot = 0u32;
++    for (i, c) in val.chars().enumerate() {
++        match (i, c) {
++            (0, 'r') => prot |= VM_PROT_READ,
++            (1, 'w') => prot |= VM_PROT_WRITE,
++            (2, 'x') => prot |= VM_PROT_EXECUTE,
++            (_, '-') => {}
++            _ => fatal!("malformed {opt} protection: {val}"),
++        }
++    }
++    prot
++}
++
+ /// Expands @file response-file arguments, splitting the file's contents
+ /// on whitespace with simple quote handling.
+ pub fn expand_response_files(argv: &[String]) -> Vec<String> {
+@@ -488,6 +531,48 @@
+             "-adhoc_codesign" => args.adhoc_codesign = true,
+             "-no_adhoc_codesign" => args.adhoc_codesign = false,
+             "-dynamic" => args.dynamic = true,
++            "-static" => args.static_link = true,
++            "-pie" => args.pie = true,
++            "-image_base" => args.image_base = Some(parse_hex(opt, next_arg(&mut i))),
++            "-segaddr" => {
++                let seg = next_arg(&mut i).to_string();
++                let addr = parse_hex(opt, next_arg(&mut i));
++                args.segaddrs.push((seg, addr));
++            }
++            "-segprot" => {
++                let seg = next_arg(&mut i).to_string();
++                let max = parse_prot(opt, next_arg(&mut i));
++                let init = parse_prot(opt, next_arg(&mut i));
++                args.segprots.push((seg, max, init));
++            }
++            "-segment_order" => {
++                args.segment_order = next_arg(&mut i)
++                    .split(':')
++                    .filter(|s| !s.is_empty())
++                    .map(String::from)
++                    .collect();
++            }
++            "-rename_section" => {
++                let old_seg = next_arg(&mut i).to_string();
++                let old_sect = next_arg(&mut i).to_string();
++                let new_seg = next_arg(&mut i).to_string();
++                let new_sect = next_arg(&mut i).to_string();
++                args.rename_sections
++                    .push((old_seg, old_sect, new_seg, new_sect));
++            }
++            "-rename_segment" => {
++                let old = next_arg(&mut i).to_string();
++                let new = next_arg(&mut i).to_string();
++                args.rename_segments.push((old, new));
++            }
++            // -single_module / -multi_module select the (default) single
++            // module model; nothing to do.
++            "-single_module" | "-multi_module" => {}
++            // -version_load_command is ld64's hint to emit an
++            // LC_BUILD_VERSION/LC_VERSION_MIN command; mold always emits
++            // one.  -no_dead_strip_inits_and_terms keeps initializer and
++            // terminator atoms, which mold's dead-strip already retains.
++            "-version_load_command" | "-no_dead_strip_inits_and_terms" => {}
+             "-headerpad" => args.headerpad = parse_hex(opt, next_arg(&mut i)),
+             "-pagezero_size" => {
+                 args.pagezero_size = parse_hex(opt, next_arg(&mut i));
+--- a/src/context.rs
++++ b/src/context.rs
+@@ -343,6 +343,11 @@
+     /// Returns true if the output uses chained fixups rather than
+     /// classic dyld rebase/bind opcodes.
+     pub fn use_chained_fixups(&self) -> bool {
++        // A static executable (the kernel) has no dyld, so it uses no
++        // chained fixups or dyld info at all.
++        if self.args.static_link {
++            return false;
++        }
+         // ld-prime's defaults: chained fixups from macOS 12 on arm64 and
+         // from macOS 13 on x86_64 (below that, classic dyld info with
+         // lazy binding), and never under -undefined dynamic_lookup or
+--- a/src/passes.rs
++++ b/src/passes.rs
+@@ -674,13 +674,59 @@
+     let used: Vec<AtomicBool> = (0..n).map(|_| AtomicBool::new(false)).collect();
+     let weak_ref: Vec<AtomicBool> = (0..n).map(|_| AtomicBool::new(false)).collect();
+     let strong_ref: Vec<AtomicBool> = (0..n).map(|_| AtomicBool::new(false)).collect();
++    // Which symbols a relocation actually names. A .globl declaration
++    // with no reference (xnu's assembly is full of them) leaves an
++    // undefined nlist behind, but ld64 only demands a definition for
++    // symbols a relocation uses. An LTO placeholder carries its
++    // references inside the bitcode and has no relocations here, so its
++    // undefined nlists stay unconditional references.
++    let referenced: Vec<AtomicBool> = (0..n).map(|_| AtomicBool::new(false)).collect();
++    ctx.objs
++        .par_iter()
++        .filter(|obj| !only_alive || obj.is_alive)
++        .for_each(|obj| {
++            if obj.lto_module.is_some() {
++                return;
++            }
++            for rel in &obj.relocs {
++                if let crate::input_sections::RelocTarget::Sym(idx) = rel.target() {
++                    let sym_id = obj.symbols[idx as usize];
++                    referenced[sym_id as usize].store(true, Ordering::Relaxed);
++                }
++            }
++        });
++    // Exception handling names its personality routine only in the CIE
++    // (and, for compact unwind, in the unwind record), not in a
++    // relocation, so those references count too.
++    for cie in &ctx.cies {
++        if let Some(p) = cie.personality {
++            referenced[p as usize].store(true, Ordering::Relaxed);
++        }
++    }
++    for rec in &ctx.unwind_records {
++        if let Some(p) = rec.personality() {
++            referenced[p as usize].store(true, Ordering::Relaxed);
++        }
++    }
+     ctx.objs
+         .par_iter()
+         .filter(|obj| !only_alive || obj.is_alive)
+         .for_each(|obj| {
++            let from_bitcode = obj.lto_module.is_some();
+             let r = obj.global_range();
+             for (nlist, &sym_id) in obj.nlists[r.clone()].iter().zip(&obj.symbols[r]) {
+                 if !nlist.is_stab() && nlist.is_extern() && nlist.n_type() == N_UNDF {
++                    // A tentative definition is a definition, and a
++                    // relocatable link keeps every undefined symbol, so
++                    // only a plain object's unreferenced external stays
++                    // unused.
++                    if !from_bitcode
++                        && !ctx.args.relocatable
++                        && !nlist.is_common()
++                        && !referenced[sym_id as usize].load(Ordering::Relaxed)
++                    {
++                        continue;
++                    }
+                     used[sym_id as usize].store(true, Ordering::Relaxed);
+                     if nlist.n_desc & N_WEAK_REF != 0 {
+                         weak_ref[sym_id as usize].store(true, Ordering::Relaxed);
+@@ -730,7 +776,7 @@
+         let mut align_term = 0u64;
+         if class == 1 && nlist.n_type() == N_SECT {
+             if let Some((isec, _)) =
+-                crate::input_files::find_subsec(isecs_for_rank, &obj.subsecs, nlist.n_value)
++                crate::input_files::find_subsec_or_end(isecs_for_rank, &obj.subsecs, nlist.n_value)
+             {
+                 align_term = 63 - isecs_for_rank[isec].p2align as u64;
+             }
+@@ -792,7 +838,7 @@
+                     }
+                     N_SECT => {
+                         sym.set_file(FileId::Obj((obj_idx) as u32));
+-                        match crate::input_files::find_subsec(
++                        match crate::input_files::find_subsec_or_end(
+                             isecs,
+                             &obj.subsecs,
+                             nlist.n_value,
+@@ -3501,6 +3547,8 @@
+     relocatable: bool,
+     data_const: bool,
+     objc_const_refs: bool,
++    renames: &[(String, String, String, String)],
++    segment_renames: &[(String, String)],
+     segname: &str,
+     sectname: &str,
+ ) -> Option<(&'static str, &'static str)> {
+@@ -3512,6 +3560,25 @@
+             other => String::leak(other.to_string()),
+         }
+     };
++    // -rename_section moves a section to another segment/section name
++    // before any other mapping (ld64 applies it to the input's section
++    // names).
++    for (old_seg, old_sect, new_seg, new_sect) in renames {
++        if segname == old_seg && sectname == old_sect {
++            return Some((
++                String::leak(new_seg.clone()),
++                String::leak(new_sect.clone()),
++            ));
++        }
++    }
++    // -rename_segment renames everything left in the old segment.
++    let mut segname = segname;
++    for (old_seg, new_seg) in segment_renames {
++        if segname == old_seg {
++            segname = new_seg;
++            break;
++        }
++    }
+     // The __LLVM segment (bitcode, Swift's module hash) is dropped from
+     // every output, -r included.
+     if segname == "__LLVM" {
+@@ -3627,6 +3694,8 @@
+                         relocatable,
+                         ctx.args.data_const,
+                         objc_const_refs,
++                        &ctx.args.rename_sections,
++                        &ctx.args.rename_segments,
+                         hdr.segname(),
+                         hdr.sectname(),
+                     )
+@@ -3896,7 +3965,7 @@
+         sects.sort();
+         sects.dedup();
+         for sect in sects {
+-            let (seg, out) = output_section_for(false, ctx.args.data_const, objc_refs_are_const(ctx), "__DATA", sect).unwrap();
++            let (seg, out) = output_section_for(false, ctx.args.data_const, objc_refs_are_const(ctx), &ctx.args.rename_sections, &ctx.args.rename_segments, "__DATA", sect).unwrap();
+             let flags = output_section_flags(seg, out, 0, false);
+             let mut size = 0u64;
+             let mut offs = Vec::new();
+@@ -4094,14 +4163,27 @@
+     // section ranks within a segment (the sort is stable, so chunks of
+     // one rank keep their creation order).
+     let mut order = ctx.chunks.clone();
++    let segment_order = ctx.args.segment_order.clone();
+     order.sort_by_key(|&id| {
+         let hdr = ctx.chunk_header(id);
+-        let seg_rank = match hdr.segname {
+-            "__TEXT" => 0,
+-            "__DATA_CONST" => 1,
+-            "__DATA" => 2,
+-            "__LINKEDIT" => 4,
+-            _ => 3,
++        let seg_rank = if segment_order.is_empty() {
++            match hdr.segname {
++                "__TEXT" => 0,
++                "__DATA_CONST" => 1,
++                "__DATA" => 2,
++                "__LINKEDIT" => 4,
++                _ => 3,
++            }
++        } else if hdr.segname == "__LINKEDIT" {
++            // __LINKEDIT's tables are built from every other segment's
++            // final addresses, so it must be placed last regardless of
++            // -segment_order.
++            usize::MAX
++        } else {
++            segment_order
++                .iter()
++                .position(|s| s == hdr.segname)
++                .unwrap_or(segment_order.len())
+         };
+         let sect_rank = match id {
+             ChunkId::MachHeader => 0,
+@@ -5042,6 +5124,18 @@
+             continue;
+         }
+ 
++        // -segaddr overrides a named segment's address; -image_base sets
++        // the __TEXT base.  Segments without an override follow the
++        // previous segment.
++        let seg_name = ctx.segments[seg_idx].name;
++        if let Some(&(_, a)) = ctx.args.segaddrs.iter().find(|(s, _)| s.as_str() == seg_name) {
++            addr = a;
++        } else if seg_name == "__TEXT" {
++            if let Some(base) = ctx.args.image_base {
++                addr = base;
++            }
++        }
++
+         let seg_vmaddr = addr;
+         let seg_fileoff = fileoff;
+         let mut cursor = fileoff;
+--- a/src/output_chunks/mod.rs
++++ b/src/output_chunks/mod.rs
+@@ -298,8 +298,16 @@
+ 
+     cmd.nsects = sects.len() as u32;
+     cmd.cmdsize = (size_of::<SegmentCommand>() + sects.len() * size_of::<MachSection>()) as u32;
+-    cmd.maxprot = segment_prot(seg.name);
+-    cmd.initprot = segment_prot(seg.name);
++    let default_prot = segment_prot(seg.name);
++    let (maxprot, initprot) = ctx
++        .args
++        .segprots
++        .iter()
++        .find(|(name, _, _)| name.as_str() == seg.name)
++        .map(|(_, max, init)| (*max, *init))
++        .unwrap_or((default_prot, default_prot));
++    cmd.maxprot = maxprot;
++    cmd.initprot = initprot;
+     // dyld makes __DATA_CONST read-only once binds are applied.
+     if seg.name == "__DATA_CONST" {
+         cmd.flags = SG_READ_ONLY;
+--- a/src/input_files.rs
++++ b/src/input_files.rs
+@@ -127,6 +127,34 @@
+     let isec = &isecs[id as usize];
+     if addr < isec.input_addr as u64 + isec.size as u64 || (isec.size as u64 == 0 && addr == isec.input_addr as u64) {
+         Some((id, addr - isec.input_addr as u64))
++    } else {
++        None
++    }
++}
++
++/// Like `find_subsec`, but also accepts an address at the very end of
++/// the last subsection.  Assembler places a bound label (an array's
++/// `_end`, say) right after the data it bounds, and these objects are
++/// built without MH_SUBSECTIONS_VIA_SYMBOLS, so such a symbol has no
++/// zero-length subsection of its own.  Only external symbols use this:
++/// a local label at a section's end is an alias, not an atom of its own,
++/// and a relocatable link still drops it.
++pub fn find_subsec_or_end(
++    isecs: &[InputSection],
++    subsecs: &[crate::input_sections::InputSectionId],
++    addr: u64,
++) -> Option<(usize, u64)> {
++    if let Some(found) = find_subsec(isecs, subsecs, addr) {
++        return Some(found);
++    }
++    let i = subsecs.partition_point(|&id| isecs[id as usize].input_addr as u64 <= addr);
++    if i == 0 {
++        return None;
++    }
++    let id = subsecs[i - 1] as usize;
++    let isec = &isecs[id as usize];
++    if isec.input_addr as u64 + isec.size as u64 == addr {
++        Some((id, isec.size as u64))
+     } else {
+         None
+     }
+@@ -1497,6 +1525,10 @@
+                     pos += 5;
+                 }
+                 b'R' => pos += 1,
++                // 'S' marks a signal frame and 'B' is the GNU
++                // "frameless" augmentation; neither carries
++                // augmentation data.
++                b'S' | b'B' => {}
+                 _ => fatal!("{file_name}: __eh_frame: unknown augmentation"),
+             }
+         }

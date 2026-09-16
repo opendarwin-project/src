@@ -1,0 +1,119 @@
+--- a/src/codegen.cpp
++++ b/src/codegen.cpp
+@@ -312,7 +312,26 @@
+          (m.name == "Create" || m.name == "CreateWithTypeName");
+ }
+ 
++/* Apple's IIG splits a static LOCAL method into a public declaration
++ * <Name> (resolved by the user-space side) and the kernel-side marshaling
++ * entry point <Name>_Call.  Instance LOCAL methods keep <Name>.  This is
++ * why the kernel KPI export lists contain e.g.
++ * IOServiceNotificationDispatchSource::Create_Call but
++ * IODataQueueDispatchSource::Create. */
++bool
++isCallWrapper(const Method &m)
++{
++  return m.isLocal && m.isStatic && !m.isOverride && wantsRpc(m) &&
++         !isPlainVirtualOverride(m);
++}
++
+ std::string
++wrapperMethodName(const Method &m)
++{
++  return isCallWrapper(m) ? m.name + "_Call" : m.name;
++}
++
++std::string
+ hex(uint64_t v)
+ {
+   char buf[32];
+@@ -471,6 +490,9 @@
+       argsRef = c.superName + "_" + m.name + "_Args";
+     o += "    " + std::string(m.isStatic ? "static " : "") + m.returnType +
+          "\\\n    " + m.name + "_Impl(" + argsRef + ");\\\n\\\n";
++    if (isCallWrapper(m))
++      o += "    static " + m.returnType + "\\\n    " + m.name +
++           "_Call(" + mi.args() + ");\\\n\\\n";
+   }
+ 
+   /* public: Invoke declarations */
+@@ -614,8 +636,24 @@
+     o += "\n#if __DOCUMENTATION__\n#define KERNEL IIG_KERNEL\n\n";
+     o += ch.text;
+     o += "\n\n#undef KERNEL\n#else /* __DOCUMENTATION__ */\n\n";
+-    if (c.extendsName.empty())
++    if (c.extendsName.empty()) {
+       emitClassHeader(f, c, o);
++      /* A method annotated TYPE(Cls::Method) also gets a generated OSAction
++       * subclass carrying that action's dispatch entry points, named
++       * OSAction_<Class>_<Method> (e.g.
++       * OSAction_IOUserClient_KernelCompletion for
++       * IOUserClient::KernelCompletion).  It must be emitted here, inside
++       * the file's __DOCUMENTATION__/include-guard region, so including
++       * the header more than once does not redefine it. */
++      for (auto &m : c.methods) {
++        if (m.actionType.empty()) continue;
++        Class ac;
++        ac.name = "OSAction_" + c.name + "_" + m.name;
++        ac.superName = "OSAction";
++        ac.isNative = true;
++        emitClassHeader(f, ac, o);
++      }
++    }
+     /* EXTENDS classes were merged into their target's macros */
+     o += "#endif /* !__DOCUMENTATION__ */\n\n";
+   }
+@@ -710,7 +748,7 @@
+   const Param *target = m.targetParam();
+ 
+   o += mi.replyBufferOneway ? "kern_return_t" : m.returnType;
+-  o += "\n" + c.name + "::" + m.name + "(\n";
++  o += "\n" + c.name + "::" + wrapperMethodName(m) + "(\n";
+   if (mi.replyBufferOneway) o += "        IORPC rpc,\n";
+   for (size_t i = 0; i < m.params.size(); i++) {
+     o += "        " + paramDeclDecayed(m.params[i]);
+@@ -1017,17 +1055,15 @@
+     infos.emplace_back(c, m);
+ 
+   if (c.isNative && !c.superName.empty()) {
+-    bool isAbstract = false;
+-    for (auto &m : c.methods) {
+-      if (m.isPureVirtual) {
+-        isAbstract = true;
+-        break;
+-      }
+-    }
++    /* The class body iig-lite emits never contains a pure virtual: the
++     * `= 0' methods in the .iig are documentation-only (they live in the
++     * #if __DOCUMENTATION__ passthrough), and _VirtualMethods renders the
++     * concrete overrides without `= 0'.  The generated class is therefore
++     * always concrete, and OSDefineMetaClassAndStructors (which also
++     * defines the no-argument constructors the kernel KPI export lists
++     * expect: C1Ev/C2Ev) is the correct macro. */
+     o += "#if KERNEL\n";
+-    o += isAbstract ? "OSDefineMetaClassAndAbstractStructors("
+-                    : "OSDefineMetaClassAndStructors(";
+-    o += c.name + ", " + c.superName + ")\n";
++    o += "OSDefineMetaClassAndStructors(" + c.name + ", " + c.superName + ")\n";
+     o += "#endif /* KERNEL */\n\n";
+   }
+ 
+@@ -1161,6 +1197,18 @@
+     if (!c.extendsName.empty()) continue; /* merged into target */
+     emitClassImpl(f, c, o);
+   }
++
++  for (auto &c : f.classes) {
++    if (!c.extendsName.empty()) continue;
++    for (auto &m : c.methods) {
++      if (m.actionType.empty()) continue;
++      Class ac;
++      ac.name = "OSAction_" + c.name + "_" + m.name;
++      ac.superName = "OSAction";
++      ac.isNative = true;
++      emitClassImpl(f, ac, o);
++    }
++  }
+ }
+ 
+ } /* namespace iig */

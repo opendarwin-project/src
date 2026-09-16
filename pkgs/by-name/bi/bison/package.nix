@@ -10,6 +10,10 @@ stdenv.mkDerivation rec {
   };
 
   nativeBuildInputs = [ m4 ];
+  # NOTE: mold-macho currently miscompiles bison 3.8.2 (the resulting parser
+  # segfaults in `reader`).  Keep Apple's ld for this package until the mold
+  # bug is fixed.
+  useMold = false;
 
   buildCommand = ''
     tar -xf $src --strip-components=1

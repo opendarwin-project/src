@@ -10,8 +10,16 @@
   machineConfig ? (if arch == "X86_64" then "NONE" else "QEMU"),
   sdkVersion ? (if arch == "X86_64" then "15.0" else "27.0"),
   extraMakeArgs ? "",
+  # LLVM link-time optimization.  The RELEASE kernel defaults to LTO, which
+  # makes every iteration spend most of its time in the final thin-LTO merge
+  # and link; BUILD_LTO=0 makes xnu compile and link plain objects instead,
+  # which is much faster for development iterations.
+  enableLto ? true,
   kernelOutputName ? (if arch == "X86_64" then "xnu.${kernelConfig}_${arch}" else "xnu.${kernelConfig}_${arch}_${machineConfig}"),
   description ? "XNU kernel",
+  # mold-macho rejects the kernel link's `-Wl,-static` ('mold: fatal: unknown
+  # command line option: -static'), so build the kernel with Apple's ld for now.
+  useMold ? true,
 }:
 let
   patchList = lib.concatStringsSep " " (builtins.map toString patches);
@@ -28,7 +36,7 @@ let
   };
 in
 stdenv.mkDerivation {
-  inherit pname version src;
+  inherit pname version src useMold;
 
   nativeBuildInputs = [ bootstrap-cmds iig-tools xcbuild xcode-toolchain-wrappers unifdef cmake ];
 
@@ -69,6 +77,24 @@ stdenv.mkDerivation {
     cp AvailabilityVersions/availability.dsl sdk/usr/local/libexec/ 2>/dev/null || true
     cp -R AvailabilityVersions/templates sdk/usr/local/libexec/ 2>/dev/null || true
 
+    # OBJROOT/SYMROOT/DSTROOT must be environment variables, not make command-line
+    # arguments: xnu's top Makefile only runs `export OBJROOT = ...` when OBJROOT is
+    # undefined, so passing it on the command line stops it being exported to the
+    # recursively invoked per-component doconf stage (which aborts with
+    # 'OBJROOT: Undefined variable.').
+    export OBJROOT="$(pwd)/BUILD/obj"
+    export SYMROOT="$(pwd)/BUILD/sym"
+    export DSTROOT="$(pwd)/BUILD/dst"
+    export SRCROOT="$(pwd)"
+    export VERSDIR="$(pwd)"
+    # doconf is a /bin/csh script and Apple's csh aborts (exit 1) when $home is
+    # unset; the daemon's build environment provides no HOME, so give it one.
+    export HOME="$(pwd)"
+    # doconf (a csh script invoked by the generated per-component Makefiles) calls
+    # a bare `unifdef`, so the build tools must be on PATH. xnu supplies a custom
+    # buildCommand, so the stdenv's nativeBuildInputs PATH setup does not run.
+    export PATH="${bootstrap-cmds}/bin:${iig-tools}/bin:${unifdef}/bin:${xcode-toolchain-wrappers}/bin:$PATH"
+
     make \
       CC="clang" CXX="clang++" HOST_CC="clang" \
       SDKROOT="$(pwd)/sdk" HOST_SDKROOT="/" \
@@ -83,10 +109,26 @@ stdenv.mkDerivation {
       ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG="${archString}" \
       RC_DARWIN_KERNEL_VERSION="${darwinKernelVersion}" \
       KERNEL_BUILDS_IN_PARALLEL=1 \
-      OBJROOT="$(pwd)/BUILD/obj" SYMROOT="$(pwd)/BUILD/sym" DSTROOT="$(pwd)/BUILD/dst" \
+      ${if enableLto then "" else "BUILD_LTO=0"} \
       ${extraMakeArgs}
 
-    find BUILD/sym -name 'kernel*' -type f -exec cp {} $out/lib/opendarwin/${kernelOutputName} \; -quit
+    # xnu writes the linked kernel into OBJROOT as
+    # kernel.<kernel-config>.<machine-config> (the machine suffix is omitted for
+    # non-ARM64/QEMU configs).
+    kc=$(printf '%s' "${kernelConfig}" | tr 'A-Z' 'a-z')
+    mc=$(printf '%s' "${machineConfig}" | tr 'A-Z' 'a-z')
+    kernel_src="BUILD/obj/${kernelConfig}_${arch}_${machineConfig}/kernel.$kc.$mc"
+    if [ ! -f "$kernel_src" ]; then
+      kernel_src=$(find BUILD/obj -type f -name "kernel.$kc.$mc" ! -path '*.dSYM/*' -print -quit)
+    fi
+    if [ ! -f "$kernel_src" ]; then
+      kernel_src=$(find BUILD/obj -type f -name "kernel.$kc" ! -path '*.dSYM/*' -print -quit)
+    fi
+    if [ ! -f "$kernel_src" ]; then
+      echo "xnu: built kernel not found under BUILD/obj" >&2
+      exit 1
+    fi
+    cp "$kernel_src" $out/lib/opendarwin/${kernelOutputName}
   '';
 
   meta = {

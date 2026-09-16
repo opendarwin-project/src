@@ -13,6 +13,7 @@ craneLib.buildPackage {
 
   patches = [
     ./tls-dead-strip.patch
+    ./files/kernel-link.patch
   ];
 
   installPhase = ''

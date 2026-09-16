@@ -1,0 +1,14 @@
+--- a/include/mach-o/dyld.h
++++ b/include/mach-o/dyld.h
+@@ -36,6 +36,10 @@
+ #if __cplusplus
+ extern "C" {
+ #endif
++
++#ifndef DYLD_EXCLAVEKIT_UNAVAILABLE
++#define DYLD_EXCLAVEKIT_UNAVAILABLE
++#endif
+ 
+ #ifdef __DRIVERKIT_19_0
+  #define DYLD_DRIVERKIT_UNAVAILABLE __API_UNAVAILABLE(driverkit)
+*** End Patch

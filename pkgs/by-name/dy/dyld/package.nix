@@ -30,9 +30,15 @@ stdenv.mkDerivation rec {
       -target libdyld.dylib \
       -configuration Release \
       ARCHS="${if stdenv.system == "x86_64-darwin" then "x86_64" else "arm64"}" \
+      SDKROOT="$(xcrun --sdk macosx --show-sdk-path)" \
+      OTHER_LDFLAGS="-Wl,-undefined,dynamic_lookup" \
+      OTHER_CFLAGS="-DBUILDING_DYLD=1 -DBUILDING_LIBDYLD=1 -DDYLD_VERSION=${version}" \
+      USER_HEADER_SEARCH_PATHS="./dyld ./common ./mach_o" \
+      CLANG_CXX_LANGUAGE_STANDARD=c++20 \
+      GCC_C_LANGUAGE_STANDARD=c2x \
       SYMROOT="$symroot" \
       OBJROOT="$objroot" \
-      build || true
+      build
 
     build_dir="$symroot/Release"
     if [ -f "$build_dir/dyld" ]; then

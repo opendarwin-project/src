@@ -1,5 +1,16 @@
-{ lib, stdenv, fetchurl, cmake, ninja, python3, unifdef, bison, flex, bootstrap-cmds, iig-tools, xcode-toolchain-wrappers, xcbuild  }:
+{ lib, stdenv, fetchurl, cmake, ninja, python3, unifdef, bison, flex, bootstrap-cmds, iig-tools, xcode-toolchain-wrappers, xcbuild, xnu-headers  }:
 
+# A real, linkable and loadable libSystem.B.dylib.
+#
+# The umbrella dylib is built the way Apple builds it: from the Libsystem
+# project's CompatibilityHacks.c plus -reexport of the real sub-libraries
+# (libsystem_c, libsystem_malloc, libsystem_platform, ...).  The Apple Open
+# Source component sources are unpacked so their public/private headers can be
+# installed alongside it.
+#
+# The remaining Apple Open Source components (Libc, libpthread, libplatform,
+# libmalloc, libdispatch, dyld, ...) are unpacked so their public headers are
+# installed alongside the runtime, giving a self-contained SDK prefix.
 stdenv.mkDerivation rec {
   pname = "libsystem";
   version = "1356";
@@ -51,17 +62,15 @@ stdenv.mkDerivation rec {
     url = "https://github.com/apple-oss-distributions/dyld/archive/refs/tags/dyld-1378.tar.gz";
     sha256 = "509c8b081153a7b9ff08d6ddf0a681c0ab5190e1e336ef2e9748b801bdb9c59e";
   };
-  runtime_c = fetchurl {
-    url = "https://raw.githubusercontent.com/opendarwin-project/src/main/overlay/sys-libs/libsystem/files/libsystem_runtime.c";
-    sha256 = "642ed132ecc182c7b385b0fbb08f5d76295c2df4c428b0bdde13cb5e5b722470";
-  };
 
-  nativeBuildInputs = [ cmake ninja unifdef bison flex bootstrap-cmds iig-tools xcode-toolchain-wrappers xcbuild ];
+  # Use OpenDarwin's xcrun from xcbuild, never the host Xcode tools.
+  nativeBuildInputs = [ xcbuild ];
+  buildInputs = [ xnu-headers ];
 
   buildCommand = ''
     mkdir -p $out/lib $out/include/mach $out/include/sys $out/include/pthread $out/include/dispatch $out/include/os $out/include/bsm $out/include/mach-o
 
-    # Unpack resources
+    # Unpack resources (headers + reference sources)
     mkdir -p xnu Libc libpthread libplatform libmalloc AvailabilityVersions OpenBSM CarbonHeaders libdispatch dyld
     tar -xzf $xnu_src -C xnu --strip-components=1
     tar -xzf $libc_src -C Libc --strip-components=1
@@ -73,112 +82,128 @@ stdenv.mkDerivation rec {
     tar -xzf $carbon_headers_src -C CarbonHeaders --strip-components=1
     tar -xzf $libdispatch_src -C libdispatch --strip-components=1
     tar -xzf $dyld_src -C dyld --strip-components=1
+    patch -d dyld -p1 < ${./files/dyld-1378-exclavekit.patch}
+    patch -d xnu -p1 < ${./files/xnu-os-log-userspace.patch}
 
-    # Compile libSystem.B text stub (.tbd) and dynamic library
-    cat << 'EOF' > $out/lib/libSystem.B.tbd
---- !tapi-tbd
-tbd-version: 4
-targets: [ arm64-macos, x86_64-macos ]
-install-name: /usr/lib/libSystem.B.dylib
-current-version: 1356.0.0
-compatibility-version: 1.0.0
-exports:
-  - targets: [ arm64-macos, x86_64-macos ]
-    symbols:
-      - dyld_stub_binder
-      - ___error
-      - ___stack_chk_fail
-      - ___stack_chk_guard
-      - _exit
-      - __exit
-      - _abort
-      - _getpid
-      - _getppid
-      - _getuid
-      - _geteuid
-      - _getgid
-      - _getegid
-      - _read
-      - _write
-      - _open
-      - _close
-      - _unlink
-      - _chdir
-      - _fchdir
-      - _chmod
-      - _chown
-      - _dup
-      - _pipe
-      - _fcntl
-      - _fsync
-      - _mkdir
-      - _rmdir
-      - _rename
-      - _access
-      - _mmap
-      - _munmap
-      - _malloc
-      - _free
-      - _calloc
-      - _realloc
-      - _strdup
-      - _memcpy
-      - _memset
-      - _memmove
-      - _memcmp
-      - _strlen
-      - _strcmp
-      - _strncmp
-      - _strcpy
-      - _strncpy
-      - _strcat
-      - _strncat
-      - _strchr
-      - _strrchr
-      - _strstr
-      - _puts
-      - _printf
-      - _sprintf
-      - _snprintf
-      - ___snprintf_chk
-      - ___sprintf_chk
-      - _pthread_mutex_init
-      - _pthread_mutex_lock
-      - _pthread_mutex_unlock
-      - _pthread_mutex_destroy
-      - _pthread_once
-...
-EOF
+    # Build the real libSystem.B.dylib.
+    #
+    # Apple's libSystem is a thin umbrella dylib (the Libsystem project's
+    # init.c + CompatibilityHacks.c) that *reexports* the real sub-libraries:
+    # libsystem_c, libsystem_malloc, libsystem_platform, libsystem_pthread,
+    # libsystem_kernel, libsystem_m, libdispatch, libxpc, libdyld, ...
+    #
+    # Reproduce the project's linker_arguments.sh: pick the sub-libraries that
+    # exist in the SDK and -reexport them, and emit the HAVE_* config header.
+    target_arch="${if stdenv.system == "x86_64-darwin" then "x86_64" else "arm64"}"
+    XCRUN="$(type -P xcrun)"
+    test -n "$XCRUN"
+    SDKROOT="$($XCRUN --sdk macosx --show-sdk-path)"
+    LSYS="$SDKROOT/usr/lib/system"
 
-    target_triple="${if stdenv.system == "x86_64-darwin" then "x86_64-apple-darwin" else "arm64-apple-darwin"}"
-    clang -target "$target_triple" \
-      -fno-stack-protector -ffreestanding -dynamiclib \
+    mkdir -p libsystem-proj
+    tar -xzf $src -C libsystem-proj --strip-components=1
+
+    CONFIG="$PWD/libsystem-proj/config.$target_arch.normal.h"
+    REEXPORTS="$PWD/libsystem-proj/linker_arguments.$target_arch.normal.txt"
+    : > "$CONFIG"; : > "$REEXPORTS"
+    while read -r line; do
+      for lib in $line; do
+        if [ -e "$LSYS/lib''${lib}.tbd" ]; then
+          U=$(echo "$lib" | tr 'a-z' 'A-Z' | sed 's/_SIM//')
+          echo "#define HAVE_''${U} 1" >> "$CONFIG"
+          echo "-Wl,-reexport-l''${lib}" >> "$REEXPORTS"
+          break
+        fi
+      done
+    done < libsystem-proj/requiredlibs
+
+    clang -arch "$target_arch" -isysroot "$SDKROOT" -O2 -c \
+      -include "$CONFIG" -DCURRENT_VARIANT_normal=1 \
+      libsystem-proj/CompatibilityHacks.c -o compat.o
+
+    clang -arch "$target_arch" -isysroot "$SDKROOT" -dynamiclib -nostdlib \
       -install_name /usr/lib/libSystem.B.dylib \
       -compatibility_version 1.0 -current_version 1356.0 \
-      -nostdlib \
-      -o $out/lib/libSystem.B.dylib \
-      $runtime_c || true
+      -L"$LSYS" @$REEXPORTS compat.o \
+      -o $out/lib/libSystem.B.dylib
 
-    ln -sf libSystem.B.dylib $out/lib/libSystem.dylib
+    # Generate a text-based stub from the dylib's actual exports so that
+    # `-lSystem` resolves to this umbrella instead of the host SDK stub.
+    "$XCRUN" tapi stubify --filetype=tbd-v4 \
+      -o $out/lib/libSystem.B.tbd $out/lib/libSystem.B.dylib
     ln -sf libSystem.B.tbd $out/lib/libSystem.tbd
-    ln -sf libSystem.B.dylib $out/lib/libc.dylib
-    ln -sf libSystem.B.dylib $out/lib/libm.dylib
-    ln -sf libSystem.B.dylib $out/lib/libpthread.dylib
-    ln -sf libSystem.B.dylib $out/lib/libdl.dylib
 
-    # Install primary Darwin / XNU headers
-    cp -R Libc/include/* $out/include/ 2>/dev/null || true
-    cp -R libpthread/include/* $out/include/ 2>/dev/null || true
+    # Install private headers that are not part of the public SDK.
+    #
+    # Public Libc/libpthread/libmalloc/libdispatch headers are intentionally not
+    # installed: the host SDK already ships ABI-compatible, internally
+    # consistent versions, and shadowing them with the OSS source copies breaks
+    # consumers (stale availability macros, libc++'s <stddef.h>, ...).
+    mkdir -p $out/include/System
+    cp -R ${xnu-headers}/System/Library/Frameworks/System.framework/Versions/B/PrivateHeaders/* $out/include/System/ 2>/dev/null || true
+    cp -R ${xnu-headers}/usr/local/include/* $out/include/ 2>/dev/null || true
+
+    # xnu's `make installhdrs` also emits a copy of the *public* usr/include tree
+    # (sys/, mach/, ...).  Those must NOT shadow the SDK's ABI-compatible public
+    # headers, so only install the ones the SDK does not ship.
+    SDK_INC="$($XCRUN --sdk macosx --show-sdk-path)/usr/include"
+    if [ -d ${xnu-headers}/usr/include ]; then
+      (cd ${xnu-headers}/usr/include && find . -type f) | while read -r h; do
+        # The internal Availability* family must be installed as a whole: mixing
+        # Apple's AvailabilityVersions macros with the SDK's Availability.h (or
+        # vice versa) produces an inconsistent __SPI_AVAILABLE/__API_AVAILABLE.
+        case "$h" in
+          ./Availability.h|./AvailabilityInternal.h|./AvailabilityInternalLegacy.h|./AvailabilityMacros.h|./AvailabilityVersions.h|./os/availability.h)
+            ;;
+          *)
+            [ -e "$SDK_INC/$h" ] && continue
+            ;;
+        esac
+        mkdir -p "$out/include/$(dirname "$h")"
+        cp "${xnu-headers}/usr/include/$h" "$out/include/$h"
+      done
+    fi
+
+    # os/log_private.h lives in xnu's libkern sources and is not part of installhdrs.
+    # The kernel source tree is the only local source for this private header;
+    # patch it above with the small userspace declarations required by Libc.
+    mkdir -p $out/include/os
+    if [ -f xnu/libkern/os/log_private.h ]; then
+      cp xnu/libkern/os/log_private.h $out/include/os/log_private.h
+    fi
+
+    # XNU's exported external headers (corecrypto, libDER, ...).
+    cp -R xnu/EXTERNAL_HEADERS/corecrypto $out/include/ 2>/dev/null || true
+    cp -R xnu/EXTERNAL_HEADERS/libDER $out/include/ 2>/dev/null || true
+
+    # libplatform private/public headers (e.g. <_simple.h>, <os/...>).
+    cp -R libplatform/private/* $out/include/ 2>/dev/null || true
+    cp -R libplatform/internal/* $out/include/ 2>/dev/null || true
     cp -R libplatform/include/* $out/include/ 2>/dev/null || true
-    cp -R libmalloc/include/* $out/include/ 2>/dev/null || true
-    cp -R libdispatch/dispatch/* $out/include/dispatch/ 2>/dev/null || true
-    cp -R libdispatch/os/* $out/include/os/ 2>/dev/null || true
-    cp -R CarbonHeaders/*.h $out/include/ 2>/dev/null || true
-    cp -R OpenBSM/openbsm/bsm/*.h $out/include/bsm/ 2>/dev/null || true
-    cp -R dyld/include/* $out/include/ 2>/dev/null || true
 
-    ln -sf pthread/pthread.h $out/include/pthread.h 2>/dev/null || true
-    ln -sf pthread/sched.h $out/include/sched.h 2>/dev/null || true
+    # libpthread private headers (<pthread/tsd_private.h>, <pthread/private.h>, ...).
+    cp -R libpthread/private/* $out/include/ 2>/dev/null || true
+
+    # Libc's private headers (<libc_private.h>, <_libc_init.h>, ...).
+    cp -R Libc/darwin/*.h $out/include/ 2>/dev/null || true
+    cp -R Libc/os/*.h $out/include/ 2>/dev/null || true
+    cp -R Libc/locale/*.h $out/include/ 2>/dev/null || true
+    cp -R Libc/gen/*.h $out/include/ 2>/dev/null || true
+
+    # dyld's own headers (public mach-o/dyld.h plus private dyld_priv.h).
+    cp -R dyld/include/* $out/include/ 2>/dev/null || true
+    # The dyld source was patched before installation above; do not mutate
+    # generated headers with ad-hoc sed/perl commands.
+
+    # Bootstrap shim: CrashReporterClient is not open source.  dyld only uses it
+    # for diagnostic log messages, so provide no-op macros.
+    cat > $out/include/CrashReporterClient.h <<'EOF'
+#ifndef _CRASHREPORTERCLIENT_H_
+#define _CRASHREPORTERCLIENT_H_
+#define CRSetCrashLogMessage(x) ((void)0)
+#define CRSetCrashLogMessage2(x) ((void)0)
+#endif
+EOF
   '';
 
   meta = {

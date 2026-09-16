@@ -11,6 +11,7 @@ stdenv.mkDerivation rec {
 
   buildCommand = ''
     tar -xzf $src --strip-components=1
+    patch -p1 < ${./files/iig-action-classes.patch}
     mkdir -p $out/bin
     clang++ -std=c++17 -O2 -Iinclude src/main.cpp src/parse.cpp src/codegen.cpp -o $out/bin/iig
   '';

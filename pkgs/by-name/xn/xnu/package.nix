@@ -30,6 +30,7 @@
   machineConfig = if arch == "X86_64" then "NONE" else "QEMU";
   kernelConfig = "RELEASE";
   darwinKernelVersion = "27.0.0";
+  enableLto = true;
   extraMakeArgs = "MEMORY_SIZE=17179869184";
   description = "OpenDarwin XNU kernel for macOS 16 Tahoe (ARM64 QEMU/VMAPPLE or X86_64)";
 }

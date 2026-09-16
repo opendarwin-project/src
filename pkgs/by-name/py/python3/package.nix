@@ -1,4 +1,4 @@
-{ stdenv, fetchurl }:
+{ stdenv, fetchurl, zlib }:
 
 stdenv.mkDerivation rec {
   pname = "python3";
@@ -20,6 +20,10 @@ stdenv.mkDerivation rec {
   installPhase = ''
     make install
   '';
+
+  buildInputs = [
+    zlib
+  ];
 
   meta = {
     description = "Python 3.15 interpreter";

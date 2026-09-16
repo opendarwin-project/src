@@ -1,0 +1,33 @@
+--- a/Libraries/pbxbuild/Sources/Tool/ClangResolver.cpp	2026-09-12 20:34:38
++++ b/Libraries/pbxbuild/Sources/Tool/ClangResolver.cpp	2026-09-16 00:23:14
+@@ -297,9 +297,12 @@
+ 			    arguments.begin() + dialectOffset, arguments.end());
+ 			// Added below, but need to have here in case it affects
+ 			// the precompiled header (as it often does).
+-			precompiledHeaderArguments.insert(
+-			    precompiledHeaderArguments.end(),
+-			    inputArguments.begin(), inputArguments.end());
++			for (std::string const &inputArgument : inputArguments) {
++				for (std::string const &arg : pbxsetting::Type::ParseList(
++				    env.expand(pbxsetting::Value::Parse(inputArgument)))) {
++					precompiledHeaderArguments.push_back(arg);
++				}
++			}
+ 
+ 			precompiledHeaderInfo =
+ 			    std::make_shared<Tool::PrecompiledHeaderInfo>(
+@@ -319,8 +322,12 @@
+ 
+ 	AppendNotUsedInPrecompsFlags(&arguments, env);
+ 	// After all of the configurable settings, so they can override.
+-	arguments.insert(
+-	    arguments.end(), inputArguments.begin(), inputArguments.end());
++	for (std::string const &inputArgument : inputArguments) {
++		for (std::string const &arg : pbxsetting::Type::ParseList(
++		    env.expand(pbxsetting::Value::Parse(inputArgument)))) {
++			arguments.push_back(arg);
++		}
++	}
+ 	AppendDependencyInfoFlags(&arguments, _compiler, env);
+ 	AppendInputOutputFlags(&arguments, _compiler, input.path(), output);
+ 

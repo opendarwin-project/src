@@ -77,8 +77,10 @@ rec {
             ''
           else if isGit then
             let
-              rawGitUrl = pkg.git or (builtins.replaceStrings ["git+"] [""] (pkg.source or ""));
-              rev = pkg.rev or "HEAD";
+              sourceClean = builtins.replaceStrings ["git+"] [""] (pkg.source or "");
+              rawGitUrl = pkg.git or (builtins.head (builtins.split "\\?" (builtins.head (builtins.split "#" sourceClean))));
+              hashSplit = builtins.split "#" sourceClean;
+              rev = pkg.rev or (if builtins.length hashSplit > 1 then builtins.elemAt hashSplit 2 else "HEAD");
               gitArchiveUrl = pkg.gitArchiveUrl or "${rawGitUrl}/archive/${rev}.tar.gz";
               crateDir = "${pkg.name}-${pkg.version}";
             in ''
@@ -96,11 +98,11 @@ rec {
                 curl -sL "${gitArchiveUrl}" | tar -xz -C "$TMPDIR/git_${pkg.name}" --strip-components=1 2>/dev/null || true
               fi
               if [ -d "$TMPDIR/git_${pkg.name}/${pkg.name}" ]; then
-                cp -r "$TMPDIR/git_${pkg.name}/${pkg.name}/"* $out/vendor/${crateDir}/ 2>/dev/null || true
-                cp -r "$TMPDIR/git_${pkg.name}/${pkg.name}/"* $out/vendor/${pkg.name}/ 2>/dev/null || true
+                cp -R "$TMPDIR/git_${pkg.name}/${pkg.name}/". $out/vendor/${crateDir}/ 2>/dev/null || true
+                cp -R "$TMPDIR/git_${pkg.name}/${pkg.name}/". $out/vendor/${pkg.name}/ 2>/dev/null || true
               else
-                cp -r "$TMPDIR/git_${pkg.name}/"* $out/vendor/${crateDir}/ 2>/dev/null || true
-                cp -r "$TMPDIR/git_${pkg.name}/"* $out/vendor/${pkg.name}/ 2>/dev/null || true
+                cp -R "$TMPDIR/git_${pkg.name}/". $out/vendor/${crateDir}/ 2>/dev/null || true
+                cp -R "$TMPDIR/git_${pkg.name}/". $out/vendor/${pkg.name}/ 2>/dev/null || true
               fi
               echo '{"package":null,"files":{}}' > $out/vendor/${crateDir}/.cargo-checksum.json
               echo '{"package":null,"files":{}}' > $out/vendor/${pkg.name}/.cargo-checksum.json
@@ -112,23 +114,32 @@ rec {
       gitPkgs = builtins.filter (p: builtins.substring 0 4 (p.source or "") == "git+") pkgsList;
       uniqueGitSources = lib.unique (map (p: p.source or "") gitPkgs);
 
-      gitSourceConfig = builtins.concatStringsSep "\n" (map (source:
+      gitPatchConfig = builtins.concatStringsSep "\n" (map (source:
         let
           pkg = builtins.head (builtins.filter (p: (p.source or "") == source) gitPkgs);
-          gitUrl = pkg.git or (builtins.replaceStrings ["git+"] [""] source);
-          rev = pkg.rev or "";
-          # Cargo source keys never include the `#<precise>` fragment
-          cleanKey = builtins.head (builtins.split "#" source);
+          noGitPrefix = builtins.replaceStrings ["git+"] [""] source;
+          gitUrl = pkg.git or (builtins.head (builtins.split "\\?" (builtins.head (builtins.split "#" noGitPrefix))));
+          cleanKey = builtins.head (builtins.split "#" noGitPrefix);
+          matchingPkgs = builtins.filter (p: (p.source or "") == source) gitPkgs;
+          patchEntries = builtins.concatStringsSep "\n" (map (p:
+            "${p.name} = { path = \"vendor/${p.name}\" }"
+          ) matchingPkgs);
         in ''
-          [source."${cleanKey}"]
-          git = "${gitUrl}"
-          ${if rev != "" then "rev = \"${rev}\"" else ""}
-          replace-with = "vendored-sources"
+          [patch."${gitUrl}"]
+          ${patchEntries}
+
+          [patch."${cleanKey}"]
+          ${patchEntries}
         ''
       ) uniqueGitSources);
     in
       stdenv.mkDerivation {
         name = "cargo-vendor-dir";
+
+        # Git dependencies are cloned/fetched from the network while vendoring.
+        # Mark the build as impure so the sandbox grants network access (the
+        # resulting contents are pinned by the revisions in Cargo.lock).
+        __noChroot = "1";
 
         buildCommand = ''
           mkdir -p $out/vendor
@@ -140,10 +151,10 @@ rec {
           [source.crates-io]
           replace-with = "vendored-sources"
 
-          ${gitSourceConfig}
-
           [source.vendored-sources]
           directory = "vendor"
+
+          ${gitPatchConfig}
           EOF
         '';
       };

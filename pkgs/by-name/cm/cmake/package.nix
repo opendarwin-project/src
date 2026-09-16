@@ -13,9 +13,13 @@ stdenv.mkDerivation rec {
     gnumake
   ];
 
-  buildPhase = ''
+  configurePhase = ''
     NCPUS=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
     ./bootstrap --prefix=$out --parallel=$NCPUS -- -DCMAKE_USE_OPENSSL=OFF
+  '';
+
+  buildPhase = ''
+    NCPUS=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
     make -j$NCPUS
   '';
 

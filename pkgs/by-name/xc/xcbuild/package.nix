@@ -21,7 +21,10 @@ stdenv.mkDerivation rec {
 
   nativeBuildInputs = [ cmake ninja ];
 
+  patches = [ ./files/expand-compiler-flags.patch ];
+
   unpackPhase = ''
+    tar -xzf $src --strip-components=1
     mkdir -p ThirdParty/linenoise ThirdParty/googletest
     tar -xzf $linenoise_src -C ThirdParty/linenoise --strip-components=1
     tar -xzf $googletest_src -C ThirdParty/googletest --strip-components=1
