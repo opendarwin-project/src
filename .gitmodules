@@ -1,7 +1,4 @@
 [submodule "rix"]
 	path = rix
-	url = https://github.com/tinted-software/rix.git
+	url = https://github.com/tinted-software/rix
 	branch = canon
-[submodule "fix"]
-	path = fix
-	url = https://github.com/theoparis/fix

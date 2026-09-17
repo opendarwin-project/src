@@ -12,7 +12,7 @@ craneLib.buildPackage {
   cargoLock = ./Cargo.lock;
 
   patches = [
-    ./tls-dead-strip.patch
+    ./files/tls-dead-strip.patch
     ./files/kernel-link.patch
   ];
 
