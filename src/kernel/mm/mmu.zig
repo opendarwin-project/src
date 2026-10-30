@@ -204,7 +204,11 @@ fn mapPage4K(root: *Table, va: u64, pa: u64, prot: Prot) void {
 // a 16-byte vector load/store, and every element of an array of a
 // non-16-byte-multiple-sized struct isn't 16-aligned even when the array
 // itself is - see mmu.zig's module doc comment for why that's fatal here.
-pub const Region = extern struct { pa: u64, len: u64, prot: Prot, _pad: u64 = 0 };
+// The 16-byte alignment on `pa` raises the struct's ABI alignment, so
+// `kernel_regions` / `extra_kernel_regions` (and any other Region array) are
+// 16-aligned too. Without it the array is only 8-aligned, and a pre-MMU
+// `ldr q` of an element faults (ESR 0x96000021) since MMU-off memory is Device.
+pub const Region = extern struct { pa: u64 align(16), len: u64, prot: Prot, _pad: u64 = 0 };
 
 // Shared physical layout constants. Duplicated from kmain.zig's boot-time
 // values on purpose (kept here too so proc/task.zig can build a per-task
