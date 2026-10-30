@@ -291,8 +291,8 @@ fn fatNode(vp: *vfs.Vnode) *FatNode {
 }
 
 const MAX_FAT_NODES = 128;
-var fat_node_pool: [MAX_FAT_NODES]FatNode = [_]FatNode{.{}} ** MAX_FAT_NODES;
-var fat_node_used: [MAX_FAT_NODES]bool = [_]bool{false} ** MAX_FAT_NODES;
+var fat_node_pool: [MAX_FAT_NODES]FatNode = @splat(.{});
+var fat_node_used: [MAX_FAT_NODES]bool = @splat(false);
 
 fn allocFatNode() ?*FatNode {
     for (&fat_node_pool, 0..) |*n, i| {

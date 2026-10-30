@@ -76,8 +76,8 @@ pub const Mount = struct {
 const MAX_MOUNTS = 4;
 const MAX_VNODES = 128;
 
-var mounts: [MAX_MOUNTS]Mount = [_]Mount{.{}} ** MAX_MOUNTS;
-var vnodes: [MAX_VNODES]Vnode = [_]Vnode{.{}} ** MAX_VNODES;
+var mounts: [MAX_MOUNTS]Mount = @splat(.{});
+var vnodes: [MAX_VNODES]Vnode = @splat(.{});
 var root_mp: ?*Mount = null;
 
 pub fn rootMount() ?*Mount {

@@ -107,7 +107,7 @@ pub const DeviceType = enum {
 
 pub const InputState = struct {
     device_type: DeviceType = .unknown,
-    name: [64]u8 = [_]u8{0} ** 64,
+    name: [64]u8 = @splat(0),
     name_len: usize = 0,
 
     // Absolute pointer state (e.g. tablet)

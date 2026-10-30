@@ -194,7 +194,7 @@ fn findEcam(reader: *const dtree.Reader) ?EcamWindow {
         compatible: ?[]const u8 = null,
     };
 
-    var stack: [32]Frame = [_]Frame{.{}} ** 32;
+    var stack: [32]Frame = @splat(.{});
     var sp: usize = 0;
     var it = reader.nodeIterator();
 

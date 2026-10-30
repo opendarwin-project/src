@@ -31,7 +31,7 @@ pub const Segment = extern struct {
 pub const DylibBlob = extern struct {
     mach_header_va: u64 = 0,
     segment_count: u32 = 0,
-    segments: [MAX_SEGMENTS_PER_DYLIB]Segment = [_]Segment{.{}} ** MAX_SEGMENTS_PER_DYLIB,
+    segments: [MAX_SEGMENTS_PER_DYLIB]Segment = @splat(.{}),
 
     trie_len: u32 = 0,
     trie_blob: [12]u8 = std.mem.zeroes([12]u8),
@@ -41,7 +41,7 @@ pub const Manifest = extern struct {
     magic: [4]u8 = MAGIC,
     shared_region_start: u64 = 0,
     dylib_count: u32 = 0,
-    dylibs: [MAX_DYLIBS]DylibBlob = [_]DylibBlob{.{}} ** MAX_DYLIBS,
+    dylibs: [MAX_DYLIBS]DylibBlob = @splat(.{}),
 
     main_blob: [12]u8 = std.mem.zeroes([12]u8),
     main_len: u32 = 0,

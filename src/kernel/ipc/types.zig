@@ -49,10 +49,10 @@ pub const IO_BITS_TYPE_MASK: io_bits_t = 0x000f0000;
 pub const IO_BITS_TYPE_SHIFT: u32 = 16;
 
 pub inline fn io_makebits(typ: IOT, refs: io_references_t) io_bits_t {
-    return (@intFromEnum(typ) << IO_BITS_TYPE_SHIFT) | (refs & IO_BITS_REF_MASK);
+    return (@backingInt(typ) << IO_BITS_TYPE_SHIFT) | (refs & IO_BITS_REF_MASK);
 }
 pub inline fn io_type(bits: io_bits_t) IOT {
-    return @enumFromInt((bits & IO_BITS_TYPE_MASK) >> IO_BITS_TYPE_SHIFT);
+    return @fromBackingInt(@intCast((bits & IO_BITS_TYPE_MASK) >> IO_BITS_TYPE_SHIFT));
 }
 pub inline fn io_refs(bits: io_bits_t) io_references_t {
     return bits & IO_BITS_REF_MASK;

@@ -42,7 +42,7 @@ pub const Process = struct {
     bsdthread_wqstart: u64 = 0,
 
     /// Per-signal actions. Index 0 is unused (signals are 1..NSIG-1).
-    sig_actions: [NSIG]SigAction = [_]SigAction{.{}} ** NSIG,
+    sig_actions: [NSIG]SigAction = @splat(.{}),
     /// Process-wide pending set posted by kill(2).
     sig_pending: u32 = 0,
     /// Signals currently ignored / caught (bitmasks).
@@ -86,7 +86,7 @@ pub const Task = struct {
     /// identity mapping) with `sp_el0` initially at `stack_top`.
     pub fn create(user_regions: []const mmu.Region, entry: u64, stack_top: u64) Task {
         var frame = context.Frame{
-            .x = [_]u64{0} ** 31,
+            .x = @splat(0),
             .sp_el0 = stack_top,
             .elr_el1 = entry,
             .spsr_el1 = 0, // EL0t, all exception masks clear
@@ -117,7 +117,7 @@ pub const Task = struct {
     /// Create a thread context that shares its parent's process state.
     pub fn createThreadLike(parent: *const Task, entry: u64, stack_top: u64, arg: u64) Task {
         var frame = context.Frame{
-            .x = [_]u64{0} ** 31,
+            .x = @splat(0),
             .sp_el0 = stack_top,
             .elr_el1 = entry,
             .spsr_el1 = 0,

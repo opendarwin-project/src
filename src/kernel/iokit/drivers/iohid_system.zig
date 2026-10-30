@@ -46,7 +46,7 @@ pub fn getPointState(out: *IOHIDPointState) types.IOReturn {
             .rel_dx = st.rel_dx,
             .rel_dy = st.rel_dy,
             .buttons = st.buttons,
-            .device_type = @intFromEnum(st.device_type),
+            .device_type = @backingInt(st.device_type),
             .abs_updated = if (st.abs_updated) 1 else 0,
         };
         return types.kIOReturnSuccess;

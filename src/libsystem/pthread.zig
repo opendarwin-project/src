@@ -15,7 +15,7 @@ const Pthread = extern struct {
 };
 
 var main_pthread: Pthread = .{ .id = 1 };
-var pthreads: [MAX_PTHREADS]Pthread = [_]Pthread{.{}} ** MAX_PTHREADS;
+var pthreads: [MAX_PTHREADS]Pthread = @splat(.{});
 var next_pthread: usize = 0;
 var bsdthread_registered: bool = false;
 
@@ -258,7 +258,7 @@ const PthreadKey = extern struct {
     destructor: ?*const fn (?*anyopaque) callconv(.c) void = null,
 };
 
-var pthread_keys: [MAX_PTHREAD_KEYS]PthreadKey = [_]PthreadKey{.{}} ** MAX_PTHREAD_KEYS;
+var pthread_keys: [MAX_PTHREAD_KEYS]PthreadKey = @splat(.{});
 
 pub export fn pthread_key_create(key_out: ?*usize, destructor: ?*const fn (?*anyopaque) callconv(.c) void) c_int {
     for (0..MAX_PTHREAD_KEYS) |i| {

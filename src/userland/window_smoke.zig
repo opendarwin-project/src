@@ -197,7 +197,7 @@ fn attrOffset(name: []const u8) u32 {
     return if (std.mem.eql(u8, name, "aPos")) 0 else 8;
 }
 
-fn renderPrismTriangle(gpa: std.mem.Allocator, pixels: []u8, width: u32, height: u32, stride: u32) !void {
+fn renderPrismTriangle(gpa: std.mem.Allocator, io: std.Io, pixels: []u8, width: u32, height: u32, stride: u32) !void {
     log("[prism] compiling vs\n");
     var cvs = try prism.glsl.compileForStageWithLayout(gpa, vs_src, .vertex);
     defer cvs.deinit(gpa);
@@ -206,7 +206,7 @@ fn renderPrismTriangle(gpa: std.mem.Allocator, pixels: []u8, width: u32, height:
     defer gpa.free(fs_spirv);
 
     log("[prism] creating device\n");
-    const device = try prism.drivers.software.driver.createDevice(gpa);
+    const device = try prism.drivers.software.driver.createDevice(gpa, io);
     defer device.deinit();
 
     log("[prism] creating vbuf\n");
@@ -560,7 +560,7 @@ fn makeWindow(cid: CGSConnectionID, x: f32, y: f32, width: u32, height: u32, tit
     return wid;
 }
 
-pub fn main() u8 {
+pub fn main(init: std.process.Init) u8 {
     var cid: CGSConnectionID = 0;
     if (CGSNewConnection(null, &cid) != 0 or cid == 0) {
         log("CGSNewConnection failed\n");
@@ -614,7 +614,7 @@ pub fn main() u8 {
     log("[window_smoke] page_allocator test free succeeded\n");
 
     const pixels = fb.base[0 .. @as(usize, fb.stride) * fb.height];
-    renderPrismTriangle(std.heap.page_allocator, pixels, fg_w, fg_h, fb.stride) catch |err| {
+    renderPrismTriangle(std.heap.page_allocator, init.io, pixels, fg_w, fg_h, fb.stride) catch |err| {
         log("Prism HAL render failed: ");
         log(@errorName(err));
         log(" (");

@@ -21,7 +21,7 @@ pub const IOPCIDevice = struct {
     mmio_base: u64 = 0,
     mmio_len: u64 = 0,
     irq: u64 = 0,
-    bar_maps: [6]memory.IOMemoryDescriptor = [_]memory.IOMemoryDescriptor{.{}} ** 6,
+    bar_maps: [6]memory.IOMemoryDescriptor = @splat(.{}),
     bars_assigned: bool = false,
 
     pub fn initFromProviderInfo(self: *IOPCIDevice, info: provider_info.Info, ecam_base: u64) void {

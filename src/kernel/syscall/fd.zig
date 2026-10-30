@@ -46,7 +46,7 @@ const File = struct {
     vnode: VnodeFile = .{},
 };
 
-var files: [MAX_FDS]File = [_]File{.{}} ** MAX_FDS;
+var files: [MAX_FDS]File = @splat(.{});
 
 fn neg(errno: i64) u64 {
     return @bitCast(-errno);
@@ -277,7 +277,7 @@ pub fn getsockname(fd: u64, addr: u64, len_addr: u64) u64 {
     _ = validSocket(fd) orelse return neg(EBADF);
     if (addr != 0) {
         const n: u32 = if (len_addr != 0) usercopy.copyIn(u32, len_addr) orelse 0 else 16;
-        var zeroes = [_]u8{0} ** 16;
+        var zeroes: [16]u8 = @splat(0);
         const out_len: usize = @intCast(@min(n, 16));
         if (!usercopy.copyBytesOut(addr, zeroes[0..out_len])) return neg(EINVAL);
         if (len_addr != 0 and !usercopy.copyOut(u32, len_addr, @intCast(out_len))) return neg(EINVAL);

@@ -36,7 +36,7 @@ const CLASS_NAME_MAX: usize = 64;
 
 pub const MatchingBody = extern struct {
     class_len: u32 = 0,
-    class_name: [CLASS_NAME_MAX]u8 = [_]u8{0} ** CLASS_NAME_MAX,
+    class_name: [CLASS_NAME_MAX]u8 = @splat(0),
 };
 
 pub const OpenBody = extern struct {
@@ -56,7 +56,7 @@ pub const ReplyBody = extern struct {
     val2: u64 = 0,
     val3: u64 = 0,
     /// Optional struct payload (FbInfo etc.), sized by caller expectation.
-    bytes: [64]u8 = [_]u8{0} ** 64,
+    bytes: [64]u8 = @splat(0),
 };
 
 fn classEql(a: []const u8, b: []const u8) bool {

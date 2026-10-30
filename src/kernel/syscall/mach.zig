@@ -38,7 +38,7 @@ const handler_type = *const fn (frame: *context.Frame) void;
 
 /// XNU mach_trap_table goes past 100 for IOKit; keep headroom through 107.
 pub const table: [128]?handler_type = init: {
-    var t: [128]?handler_type = [_]?handler_type{null} ** 128;
+    var t: [128]?handler_type = @splat(null);
     t[numbers.MACH_thread_self_trap] = machThreadSelf;
     t[numbers.MACH_task_self_trap] = machTaskSelf;
     t[numbers.MACH_host_self_trap] = machHostSelf;

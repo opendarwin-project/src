@@ -39,8 +39,8 @@ pub export const _dispatch_source_type_mach_send: DispatchSourceTypeStorage = .{
 pub export const _dispatch_source_type_mach_receive: DispatchSourceTypeStorage = .{ .tag = 9 };
 
 var global_dispatch_queue: DispatchObjectStorage = .{};
-var dispatch_queues: [8]DispatchObjectStorage = [_]DispatchObjectStorage{.{}} ** 8;
-var dispatch_sources: [16]DispatchSourceStorage = [_]DispatchSourceStorage{.{}} ** 16;
+var dispatch_queues: [8]DispatchObjectStorage = @splat(.{});
+var dispatch_sources: [16]DispatchSourceStorage = @splat(.{});
 var next_dispatch_queue: usize = 0;
 var next_dispatch_source: usize = 0;
 

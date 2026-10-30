@@ -53,7 +53,7 @@ pub const UserSiginfo = extern struct {
     si_addr: u64 = 0,
     si_value: u64 = 0,
     si_band: i64 = 0,
-    pad: [7]u64 = [_]u64{0} ** 7,
+    pad: [7]u64 = @splat(0),
 };
 
 /// Stack descriptor embedded in ucontext.
@@ -66,7 +66,7 @@ pub const UserStack = extern struct {
 
 /// GPR mcontext sufficient to restore `context.Frame` (no NEON).
 pub const UserMcontext = extern struct {
-    x: [31]u64 = [_]u64{0} ** 31,
+    x: [31]u64 = @splat(0),
     sp: u64 = 0,
     pc: u64 = 0,
     cpsr: u64 = 0,

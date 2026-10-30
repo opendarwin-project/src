@@ -22,7 +22,7 @@ pub const Frame = extern struct {
     esr_el1: u64,
     far_el1: u64,
     /// Full FPSIMD bank. Kept zero for freshly created tasks.
-    q: [32]u128 = [_]u128{0} ** 32,
+    q: [32]u128 = @splat(0),
 };
 
 comptime {

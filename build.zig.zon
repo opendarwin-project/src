@@ -2,32 +2,28 @@
     .name = .opendarwin,
     .version = "0.0.0",
     .fingerprint = 0xc9cdf4fb7ad50b09,
-    .minimum_zig_version = "0.16.0",
-    .maximum_zig_version = "0.16.0",
+    .minimum_zig_version = "0.17.0",
+    .maximum_zig_version = "0.17.0",
     .dependencies = .{
-        .dtree = .{
-            .url = "git+https://git.lilithsemi.com/LilithSemi/dtree#1a37e566bb82194acfd7d7d5514615fe4fe13c68",
-            .hash = "dtree-0.1.0-76to8Fy8AADLnQuIRRFtYugky-X4UAtcO74DyS_9Tmp3",
-        },
         .xml = .{
-            .url = "git+https://github.com/ianprime0509/zig-xml.git#b97f2ab4868ae3cac9902b33a40d3f31d2df739d",
-            .hash = "xml-0.2.0-ZTbP3yI6AgB9Rpd2hQrueO63ib0Bm6mQiL_WB1t7JAmP",
+            .url = "git+https://github.com/ianprime0509/zig-xml#4beab29d68ab308af4bd12a4fc4187c24fdad0d6",
+            .hash = "xml-0.2.2-ZTbP35N4AgAN3HBgWmBp_LAQ0MIPKW17GAGMwx4DHGYK",
         },
         .corefoundation = .{
             .url = "git+https://github.com/swiftlang/swift-corelibs-foundation?ref=swift-5.1.5-RELEASE#4cd3bf083b4705d25ac76ef8d038a06bc586265a",
             .hash = "N-V-__8AAKRqHQGd4eGkiP8lLgKhZzZG7V-mYcKKeQIFDndu",
         },
         .conduit = .{
-            .url = "git+https://git.lilithsemi.com/LilithSemi/conduit#cb9b7130b72b71001cb4347e11b0b383c0fbcdc4",
-            .hash = "conduit-0.1.0-R_mFrINUBQDxhZBhJcDJ9Jxw0Wsxo3iTZl6rKdR-o7QF",
+            .url = "git+https://git.lilithsemi.com/LilithSemi/conduit#04bc0e5a264c15b30c66069e0f110cd2d4f161b6",
+            .hash = "conduit-0.1.0-R_mFrC6iBQAIZPc-hYfgsxyC8NWXIkg-GF6TWeDRme3m",
         },
         .prism = .{
-            .url = "git+https://git.lilithsemi.com/LilithSemi/prism#43fab514fba26d2007398b05b16c8de7a8c8c91a",
-            .hash = "prism-0.1.0-PSE12KW7OADB_fa5dVGw90h98A_jQRpU0nZhu9j8WJNJ",
+            .url = "git+https://git.lilithsemi.com/LilithSemi/prism#ac7c8bdb52f6ff665b6b891578882abf2b48308a",
+            .hash = "prism-0.1.0-PSE12HfbOQCor0jDlDn3o32n7_vbg-A69F_R-rU2ovEF",
         },
-        .vibeutils = .{
-            .url = "git+https://github.com/theoparis/vibeutils#efb1d5ee7a17fd5d30cb60418b0eab6227a4c4b5",
-            .hash = "vibeutils-0.13.0-re-vZCZ7UgBTtjhjybEvJROHZoFxFD4Km0OsASYnGfiB",
+        .dtree = .{
+            .url = "git+https://git.lilithsemi.com/LilithSemi/dtree#63fe0a7292ca2df829bc3d66d86291416c657cd7",
+            .hash = "dtree-0.1.0-76to8F7kAAD-G7jPybrgZuWwvRQV8SmMXQilS86JCIpA",
         },
     },
     .paths = .{

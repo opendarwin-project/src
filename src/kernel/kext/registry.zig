@@ -10,7 +10,7 @@ var drivers: [MAX_DRIVERS]*const api.DriverDescriptor = undefined;
 var driver_count: usize = 0;
 var providers: [MAX_PROVIDERS]api.Provider = undefined;
 var provider_count: usize = 0;
-var started: [MAX_DRIVERS][MAX_PROVIDERS]bool = [_][MAX_PROVIDERS]bool{[_]bool{false} ** MAX_PROVIDERS} ** MAX_DRIVERS;
+var started: [MAX_DRIVERS][MAX_PROVIDERS]bool = @splat(@splat(false));
 
 const smoke_provider_name = "kext-smoke-provider";
 

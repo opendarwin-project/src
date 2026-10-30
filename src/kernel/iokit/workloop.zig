@@ -32,7 +32,7 @@ pub const IOInterruptEventSource = struct {
 };
 
 pub const IOWorkLoop = struct {
-    sources: [4]?*IOInterruptEventSource = .{null} ** 4,
+    sources: [4]?*IOInterruptEventSource = @splat(null),
     source_count: usize = 0,
 
     pub fn init(self: *IOWorkLoop) void {

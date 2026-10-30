@@ -15,10 +15,10 @@ const TLV_BLOCK_SIZE = 1024 * 1024;
 
 const TlvRecord = struct {
     template_base: usize = 0,
-    storage: [MAX_TLV_THREADS]?[*]u8 = [_]?[*]u8{null} ** MAX_TLV_THREADS,
+    storage: [MAX_TLV_THREADS]?[*]u8 = @splat(null),
 };
 
-var tlv_records: [MAX_TLV_RECORDS]TlvRecord = [_]TlvRecord{.{}} ** MAX_TLV_RECORDS;
+var tlv_records: [MAX_TLV_RECORDS]TlvRecord = @splat(.{});
 var tlv_record_count: usize = 0;
 
 fn currentTlvThreadIndex() usize {

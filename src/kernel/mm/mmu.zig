@@ -66,7 +66,7 @@ pub const Table = extern struct {
     entries: [512]u64 align(PAGE_SIZE),
 
     pub fn zeroed() Table {
-        return .{ .entries = [_]u64{0} ** 512 };
+        return .{ .entries = @splat(0) };
     }
 };
 

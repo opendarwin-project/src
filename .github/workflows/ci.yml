@@ -4,7 +4,6 @@ on:
     push:
         branches:
             - dev
-            - main
     pull_request:
 
 concurrency:
@@ -19,14 +18,8 @@ jobs:
             contents: read
         steps:
             - name: Checkout repository
-              uses: actions/checkout@v6
-
-            - name: Install Nix
-              uses: DeterminateSystems/nix-installer-action@main
-
-            - name: Magic Nix Cache
-              uses: DeterminateSystems/magic-nix-cache-action@main
+              uses: actions/checkout@v7
+            - uses: xyzzylabs/setup-zig@v1
               with:
-                  use_flakehub: false
-            - name: Run Nix Flake Check
-              run: nix flake check --accept-flake-config --fallback
+                version: 0.17.0
+            - run: zig build

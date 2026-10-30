@@ -4,7 +4,9 @@ fn addKernel(
     b: *std.Build,
     optimize: std.builtin.OptimizeMode,
     rootfs_path: ?[]const u8,
-    /// When set, qemu waits for this step before booting (smoke rootfs rebuild).
+    /// When set, qemu is given this generated rootfs image directly.
+    rootfs_image: ?std.Build.LazyPath,
+    /// Extra step qemu must wait for before booting (custom rootfs rebuild).
     rootfs_depend: ?*std.Build.Step,
 ) void {
     const kernel_target = b.resolveTargetQuery(.{
@@ -62,7 +64,7 @@ fn addKernel(
     // the is_linux path and hand x0 = DTB pointer to real_start. Feeding it
     // the ELF instead silently leaves x0 as whatever QEMU last left there
     // (observed to be 0), and devicetree.zig's discovery permanently no-ops.
-    const kernel_bin = b.addObjCopy(kernel_exe.getEmittedBin(), .{ .format = .bin });
+    const kernel_bin = b.addObjCopy(kernel_exe.getEmittedBin(), .{ .format = .binary });
 
     const qemu_step = b.step("qemu", "Boot the kernel in qemu-system-aarch64 -M virt");
     const qemu_cmd = b.addSystemCommand(&.{
@@ -113,9 +115,18 @@ fn addKernel(
 
     // -Drootfs=<path> attaches a raw disk image as a virtio-mmio block
     // device (see drivers/virtio_blk.zig / devicetree.zig for the kernel
-    // side). Passing -Dmain=<name> without -Drootfs implies the smoke
-    // image at zig-out/zig-smoke-rootfs.img (rebuilt first).
-    if (rootfs_path) |path| {
+    // side). Passing -Dmain=<name> without -Drootfs implies the generated
+    // smoke rootfs image (rebuilt first).
+    if (rootfs_image) |image| {
+        if (rootfs_depend) |dep| qemu_cmd.step.dependOn(dep);
+        qemu_cmd.addArg("-drive");
+        qemu_cmd.addFileArg2(image, .{
+            .prefix = "file=",
+            .suffix = ",if=none,format=raw,id=rootfs",
+        });
+        qemu_cmd.addArg("-device");
+        qemu_cmd.addArg("virtio-blk-device,drive=rootfs");
+    } else if (rootfs_path) |path| {
         if (rootfs_depend) |dep| qemu_cmd.step.dependOn(dep);
         qemu_cmd.addArgs(&.{
             "-drive",
@@ -246,7 +257,7 @@ const userland_programs = [_]UserlandProgram{
     .{
         .name = "free-smoke",
         .source = "src/userland/free_smoke.zig",
-        .description = "guest vibeutils free -h smoke demo",
+        .description = "guest free -h smoke demo (vibeutils temporarily stubbed)",
         .guest_path = "bin/free-smoke",
     },
 };
@@ -258,7 +269,6 @@ fn addUserlandProgram(
     skylight: *std.Build.Step.Compile,
     iokit: *std.Build.Step.Compile,
     prism_dep: ?*std.Build.Dependency,
-    vibeutils_dep: ?*std.Build.Dependency,
 ) *std.Build.Step.Compile {
     const guest_target = b.resolveTargetQuery(.{
         .cpu_arch = .aarch64,
@@ -266,39 +276,10 @@ fn addUserlandProgram(
         .abi = .none,
     });
 
-    var imports: [2]std.Build.Module.Import = undefined;
+    var imports: [1]std.Build.Module.Import = undefined;
     var num_imports: usize = 0;
     if (prism_dep) |dep| {
         imports[num_imports] = .{ .name = "prism", .module = dep.module("prism") };
-        num_imports += 1;
-    }
-    if (vibeutils_dep) |dep| {
-        const build_options = b.addOptions();
-        build_options.addOption([]const u8, "version", "0.13.0");
-        const build_options_mod = build_options.createModule();
-
-        const common_mod = b.createModule(.{
-            .root_source_file = dep.path("src/common/lib.zig"),
-            .target = guest_target,
-            .optimize = optimize,
-            .link_libc = false,
-            .imports = &.{
-                .{ .name = "build_options", .module = build_options_mod },
-            },
-        });
-
-        const free_mod = b.createModule(.{
-            .root_source_file = dep.path("src/free.zig"),
-            .target = guest_target,
-            .optimize = optimize,
-            .link_libc = false,
-            .imports = &.{
-                .{ .name = "common", .module = common_mod },
-                .{ .name = "build_options", .module = build_options_mod },
-            },
-        });
-
-        imports[num_imports] = .{ .name = "vibeutils_free", .module = free_mod };
         num_imports += 1;
     }
 
@@ -508,7 +489,7 @@ fn addCoreFoundation(b: *std.Build, optimize: std.builtin.OptimizeMode) ?*std.Bu
         // which the guest has no runtime for.
         "-fno-sanitize=undefined",
         "-include",
-        b.pathFromRoot("src/corefoundation/cf_prefix.h"),
+        b.root.joinString(b.allocator, "src/corefoundation/cf_prefix.h") catch @panic("OOM"),
     }) catch @panic("OOM");
 
     mod.addIncludePath(b.path("src/corefoundation/shims"));
@@ -564,6 +545,11 @@ fn addSkyLightTests(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
 
 const rootfs_basename = "rootfs.img";
 
+const Rootfs = struct {
+    step: *std.Build.Step,
+    image: std.Build.LazyPath,
+};
+
 fn addRootfs(
     b: *std.Build,
     main_name: []const u8,
@@ -571,10 +557,11 @@ fn addRootfs(
     libsystem: *std.Build.Step.Compile,
     iokit: *std.Build.Step.Compile,
     skylight: *std.Build.Step.Compile,
-) *std.Build.Step {
+) Rootfs {
     // Wire real artifact LazyPaths into make_fat32 so -Dmain= changes the
     // Run step's input hash (hardcoded zig-out/... strings do not).
-    const make_img = b.addSystemCommand(&.{ "python3", b.pathFromRoot("tools/make_fat32.py") });
+    const make_img = b.addSystemCommand(&.{"python3"});
+    make_img.addFileArg(b.path("tools/make_fat32.py"));
     const image = make_img.addOutputFileArg(rootfs_basename);
     make_img.addArg("--multi");
     make_img.addArg(b.fmt("--main-name={s}", .{main_name}));
@@ -609,7 +596,7 @@ fn addRootfs(
         b.fmt("Build a FAT32 QEMU rootfs with every userland program (MAIN = {s})", .{main_name}),
     );
     step.dependOn(&install_img.step);
-    return step;
+    return .{ .step = step, .image = image };
 }
 
 pub fn build(b: *std.Build) void {
@@ -638,25 +625,32 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .drivers = "software",
     });
-    const guest_vibeutils_dep = b.lazyDependency("vibeutils", .{}) orelse null;
 
     var programs: [userland_programs.len]BuiltUserland = undefined;
     for (userland_programs, 0..) |p, i| {
         const prism_dep = if (std.mem.eql(u8, p.name, "window-smoke")) guest_prism_dep else null;
-        const vibeutils_dep = if (std.mem.eql(u8, p.name, "free-smoke")) guest_vibeutils_dep else null;
-        programs[i] = .{ .meta = p, .exe = addUserlandProgram(b, optimize, p, skylight, iokit, prism_dep, vibeutils_dep) };
+        programs[i] = .{ .meta = p, .exe = addUserlandProgram(b, optimize, p, skylight, iokit, prism_dep) };
     }
     addSkyLightTests(b, optimize);
-    const rootfs_step = addRootfs(b, main_name, programs[0..], libsystem, iokit, skylight);
+    const rootfs = addRootfs(b, main_name, programs[0..], libsystem, iokit, skylight);
 
-    const smoke_img_path = b.fmt("{s}/{s}", .{ b.install_path, rootfs_basename });
-    const qemu_rootfs: ?[]const u8 = rootfs_opt orelse if (main_opt != null) smoke_img_path else null;
+    // -Drootfs=<path> wins; otherwise -Dmain=<name> implies the freshly
+    // generated smoke image. Pass the generated image as a LazyPath so qemu
+    // does not need to know the install prefix (removed from Build in 0.17).
+    const qemu_rootfs_path: ?[]const u8 = rootfs_opt;
+    const qemu_rootfs_image: ?std.Build.LazyPath = if (rootfs_opt == null and main_opt != null)
+        rootfs.image
+    else
+        null;
     const qemu_rootfs_dep: ?*std.Build.Step = blk: {
-        const path = qemu_rootfs orelse break :blk null;
-        if (std.mem.endsWith(u8, path, rootfs_basename) or main_opt != null)
-            break :blk rootfs_step;
+        if (rootfs_opt) |path| {
+            if (std.mem.endsWith(u8, path, rootfs_basename) or main_opt != null)
+                break :blk rootfs.step;
+            break :blk null;
+        }
+        if (main_opt != null) break :blk rootfs.step;
         break :blk null;
     };
 
-    addKernel(b, optimize, qemu_rootfs, qemu_rootfs_dep);
+    addKernel(b, optimize, qemu_rootfs_path, qemu_rootfs_image, qemu_rootfs_dep);
 }

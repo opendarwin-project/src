@@ -69,7 +69,7 @@ pub export fn setlocale(_: LcCategory, _: [*:0]const u8) ?[*:0]const u8 {
 // ── atexit / __cxa_atexit ─────────────────────────────────────────────
 
 const MAX_ATEXIT = 32;
-var atexit_fns: [MAX_ATEXIT]?*const fn () callconv(.c) void = [_]?*const fn () callconv(.c) void{null} ** MAX_ATEXIT;
+var atexit_fns: [MAX_ATEXIT]?*const fn () callconv(.c) void = @splat(null);
 var atexit_count: usize = 0;
 
 pub export fn atexit(fn_ptr: *const fn () callconv(.c) void) c_int {

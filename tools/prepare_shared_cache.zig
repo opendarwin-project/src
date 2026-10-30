@@ -243,7 +243,7 @@ const Blob = struct { name: [12]u8, data: []const u8 };
 /// `rawFatName` derives the actual FAT directory-entry bytes from this at
 /// image-write time.
 fn blobName(comptime fmt: []const u8, args: anytype) [12]u8 {
-    var buf: [12]u8 = [_]u8{0} ** 12;
+    var buf: [12]u8 = @splat(0);
     _ = std.fmt.bufPrint(&buf, fmt, args) catch unreachable;
     return buf;
 }
@@ -251,7 +251,7 @@ fn blobName(comptime fmt: []const u8, args: anytype) [12]u8 {
 /// Converts a plain name (as `blobName` produces) to a raw FAT 8.3
 /// directory-entry name+ext field (11 bytes, space-padded, no dot).
 fn rawFatName(name: [12]u8) [11]u8 {
-    var raw: [11]u8 = [_]u8{' '} ** 11;
+    var raw: [11]u8 = @splat(' ');
     const end = std.mem.indexOfScalar(u8, &name, 0) orelse name.len;
     const len = @min(end, 8);
     @memcpy(raw[0..len], name[0..len]);
@@ -494,7 +494,7 @@ fn writeFatImage(io: std.Io, gpa: std.mem.Allocator, out_path: []const u8, blobs
     defer gpa.free(img);
     @memset(img, 0);
 
-    var bs: [SECTOR]u8 = [_]u8{0} ** SECTOR;
+    var bs: [SECTOR]u8 = @splat(0);
     bs[0..3].* = .{ 0xeb, 0x58, 0x90 };
     bs[3..11].* = "MSWIN4.1".*;
     std.mem.writeInt(u16, bs[11..13], SECTOR, .little);
@@ -540,7 +540,7 @@ fn writeFatImage(io: std.Io, gpa: std.mem.Allocator, out_path: []const u8, blobs
         }
         next_cluster += cluster_count;
 
-        var entry: [32]u8 = [_]u8{0x20} ** 32; // space-padded 8.3 name area
+        var entry: [32]u8 = @splat(0x20); // space-padded 8.3 name area
         const raw_name = rawFatName(b.name);
         @memcpy(entry[0..11], &raw_name);
         entry[11] = 0x20; // archive attribute

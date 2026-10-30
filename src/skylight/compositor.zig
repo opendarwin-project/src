@@ -84,7 +84,7 @@ pub const Window = struct {
     backing_stride: u32 = 0,
     backing_order: PixelOrder = .bgra,
     title_len: u8 = 0,
-    title: [64]u8 = [_]u8{0} ** 64,
+    title: [64]u8 = @splat(0),
 
     pub fn titleSlice(self: *const Window) []const u8 {
         return self.title[0..self.title_len];
@@ -116,7 +116,7 @@ pub const Window = struct {
 };
 
 pub const Compositor = struct {
-    windows: [max_windows]Window = [_]Window{.{}} ** max_windows,
+    windows: [max_windows]Window = @splat(.{}),
     next_wid: u32 = 1,
     next_cid: u32 = 1,
     order_clock: u64 = 1,
@@ -650,7 +650,7 @@ test "composite paints desktop when no windows are ordered in" {
 
 test "window backing store lands at its bounds" {
     var buf: [16 * 16 * 4]u8 = undefined;
-    var back: [4 * 4 * 4]u8 = [_]u8{0} ** 64;
+    var back: [4 * 4 * 4]u8 = @splat(0);
     for (0..16) |i| {
         back[i * 4 + 0] = 0x10;
         back[i * 4 + 1] = 0x20;
@@ -677,8 +677,8 @@ test "window backing store lands at its bounds" {
 
 test "z-order follows level then order sequence" {
     var buf: [8 * 8 * 4]u8 = undefined;
-    var lo: [8 * 8 * 4]u8 = [_]u8{0} ** 256;
-    var hi: [8 * 8 * 4]u8 = [_]u8{0} ** 256;
+    var lo: [8 * 8 * 4]u8 = @splat(0);
+    var hi: [8 * 8 * 4]u8 = @splat(0);
     for (0..64) |i| {
         lo[i * 4 + 0] = 0x11;
         lo[i * 4 + 3] = 0xff;
@@ -708,7 +708,7 @@ test "z-order follows level then order sequence" {
 
 test "alpha blends against what is already on screen" {
     var buf: [4 * 4 * 4]u8 = undefined;
-    var back: [4 * 4 * 4]u8 = [_]u8{0} ** 64;
+    var back: [4 * 4 * 4]u8 = @splat(0);
     for (0..16) |i| {
         back[i * 4 + 0] = 0xff;
         back[i * 4 + 3] = 0xff;
@@ -737,7 +737,7 @@ test "releasing a connection drops its windows" {
 
 test "rgba clients are swizzled into a bgra scanout" {
     var buf: [2 * 2 * 4]u8 = undefined;
-    var back: [2 * 2 * 4]u8 = [_]u8{0} ** 16;
+    var back: [2 * 2 * 4]u8 = @splat(0);
     for (0..4) |i| {
         back[i * 4 + 0] = 0xaa; // R
         back[i * 4 + 1] = 0xbb;

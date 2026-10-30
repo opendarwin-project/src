@@ -53,7 +53,7 @@ fn disableIrq() void {
 var slots: [MAX_TASKS]Slot = undefined;
 var count: usize = 0;
 var slots_lock: SpinLock = .{};
-var running: [smp.MAX_CPUS]?usize = [_]?usize{null} ** smp.MAX_CPUS;
+var running: [smp.MAX_CPUS]?usize = @splat(null);
 
 pub fn spawn(user_regions: []const mmu.Region, entry: u64, stack_top: u64) usize {
     slots_lock.lock();

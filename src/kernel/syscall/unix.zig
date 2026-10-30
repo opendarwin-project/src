@@ -15,7 +15,7 @@ const SIGCANTMASK = task_mod.SIGCANTMASK;
 const handler_type = *const fn (frame: *context.Frame) void;
 
 pub const table: [1024]?handler_type = init: {
-    var t: [1024]?handler_type = [_]?handler_type{null} ** 1024;
+    var t: [1024]?handler_type = @splat(null);
     t[numbers.SYS_exit] = sysExit;
     t[numbers.SYS_write] = sysWrite;
     t[numbers.SYS_read] = sysRead;
